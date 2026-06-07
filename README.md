@@ -45,9 +45,10 @@ Set `SOLANA_RPC_URL` in `.env` to a private RPC endpoint for reliable mainnet re
 
 ```bash
 poetry install
+poetry run jupyter notebook notebooks/01_connect_fetch_explore_meteora.ipynb
 ```
 
-Notebook workflow will be added in later steps.
+The notebook runs the TypeScript pipeline via shell commands, loads the bin atlas CSV, and plots liquidity around the active bin.
 
 ## Project layout
 
@@ -84,7 +85,11 @@ notes/         Domain notes and research log
 - **Step 0** — TypeScript + Poetry skeleton, Solana RPC smoke test (`npm run smoke`)
 - **Step 1** — Domain notes and README (this document)
 - **Step 2** — Pool discovery (`npm run discover:pools` → `data/raw/pools_<timestamp>.json`, `data/processed/pool_candidates.csv`)
-- **Next** — Pool snapshot, bin fetching, normalization, notebook
+- **Step 3** — Pool snapshot (`npm run fetch:pool -- --pool <ADDRESS>` → `data/raw/processed/pool_snapshot_<pool>_<timestamp>.json`)
+- **Step 4** — Bin arrays (`npm run fetch:bins -- --pool <ADDRESS>` → `data/raw/bin_arrays_<pool>_<timestamp>.json`)
+- **Step 5** — Bin atlas normalization (`npm run normalize:bins -- --pool <ADDRESS>` → `data/processed/bin_atlas_<pool>_<timestamp>.csv`)
+- **Step 6** — Jupyter notebook (`notebooks/01_connect_fetch_explore_meteora.ipynb`)
+- **Next** — Lightweight metrics (Step 7)
 
 ### Pool discovery
 
@@ -93,3 +98,27 @@ npm run discover:pools
 ```
 
 Discovery order: Meteora datapi (`https://dlmm.datapi.meteora.ag/pools`), then SDK `DLMM.getLbPairs`, then `data/manual_pools.json`. The legacy `https://dlmm-api.meteora.ag/pair/all` endpoint is checked but currently returns 404; datapi is used instead.
+
+### Pool snapshot
+
+```bash
+npm run fetch:pool -- --pool 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
+```
+
+Or set `METEORA_POOL_ADDRESS` in `.env`. Uses `DLMM.create`, `refetchStates`, and `getActiveBin` via Solana RPC.
+
+### Bin arrays
+
+```bash
+npm run fetch:bins -- --pool 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
+```
+
+Fetches all bin arrays via `getBinArrays()` by default. Use `--bounded` (optional `--bins-left N --bins-right N`) for a neighborhood around the active bin. Falls back to bounded fetch automatically if full `getBinArrays()` fails.
+
+### Normalize bin atlas
+
+```bash
+npm run normalize:bins -- --pool 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
+```
+
+Reads the latest `data/raw/bin_arrays_<pool>_*.json` (or pass `--input <path>`) and writes a flat CSV with one row per bin.
