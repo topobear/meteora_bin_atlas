@@ -8,7 +8,10 @@
     "discover:pools": "tsx src/scripts/step1_discover_pools.ts",
     "fetch:pool": "tsx src/scripts/step2_fetch_pool_snapshot.ts",
     "fetch:bins": "tsx src/scripts/step3_fetch_bin_arrays.ts",
-    "normalize:bins": "tsx src/scripts/step4_normalize_bin_atlas.ts"
+    "normalize:bins": "tsx src/scripts/step4_normalize_bin_atlas.ts",
+    "fetch:ohlcv": "tsx src/scripts/step5_fetch_pool_ohlcv.ts",
+    "fetch:series": "tsx src/scripts/step6_fetch_snapshot_series.ts",
+    "normalize:series": "tsx src/scripts/step7_normalize_snapshot_series.ts"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "^1.5.4",

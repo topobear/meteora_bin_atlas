@@ -6,6 +6,7 @@ from meteora_bin_atlas.paths import (
     DATA_RAW,
     PLOTS_DIR,
     PROJECT_ROOT,
+    all_matching,
     latest_matching,
     load_project_env,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "PROJECT_ROOT",
     "RpcInfo",
     "__version__",
+    "all_matching",
     "get_rpc_info",
     "latest_matching",
     "load_project_env",

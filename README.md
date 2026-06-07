@@ -35,9 +35,11 @@ See [notes/dlmm_notes.md](notes/dlmm_notes.md) for fuller domain notes and sourc
 
 ```bash
 cp .env.example .env
-npm install
-npm run smoke
+make install
+make smoke
 ```
+
+Or without Make: `npm install` and `npm run smoke`. Run `make help` for all targets.
 
 Set `SOLANA_RPC_URL` in `.env` to a private RPC endpoint for reliable mainnet reads. The smoke script prints only the RPC hostname, not API keys.
 
@@ -122,3 +124,19 @@ npm run normalize:bins -- --pool 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
 ```
 
 Reads the latest `data/raw/bin_arrays_<pool>_*.json` (or pass `--input <path>`) and writes a flat CSV with one row per bin.
+
+### Temporal sample (for animation)
+
+Meteora datapi has **price/volume history** but not historical per-bin liquidity. Use both:
+
+```bash
+# All three steps (defaults: 7d hourly OHLCV + 20 snapshots × 30s)
+make temporal POOL=<ADDRESS>
+
+# Or step by step
+make fetch-ohlcv POOL=<ADDRESS> OHLCV_TIMEFRAME=1h OHLCV_LOOKBACK_DAYS=7
+make fetch-series POOL=<ADDRESS> SERIES_COUNT=20 SERIES_INTERVAL_SEC=30
+make normalize-series POOL=<ADDRESS>
+```
+
+Outputs: `data/processed/pool_ohlcv_<pool>_<tf>_*.json` and `data/processed/bin_atlas_series_<pool>_*.csv`.

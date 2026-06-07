@@ -33,3 +33,8 @@ def latest_matching(directory: Path, pattern: str) -> Path:
     if not matches:
         raise FileNotFoundError(f"No files matching {pattern} in {directory}")
     return matches[-1]
+
+
+def all_matching(directory: Path, pattern: str) -> list[Path]:
+    """Return all paths matching ``pattern`` in ``directory``, sorted."""
+    return sorted(directory.glob(pattern))
