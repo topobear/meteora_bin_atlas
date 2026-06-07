@@ -11,7 +11,8 @@
     "normalize:bins": "tsx src/scripts/step4_normalize_bin_atlas.ts",
     "fetch:ohlcv": "tsx src/scripts/step5_fetch_pool_ohlcv.ts",
     "fetch:series": "tsx src/scripts/step6_fetch_snapshot_series.ts",
-    "normalize:series": "tsx src/scripts/step7_normalize_snapshot_series.ts"
+    "normalize:series": "tsx src/scripts/step7_normalize_snapshot_series.ts",
+    "temporal": "tsx src/scripts/step8_fetch_temporal.ts"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "^1.5.4",

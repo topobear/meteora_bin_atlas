@@ -13,15 +13,19 @@ BOUNDED ?=
 OHLCV_TIMEFRAME ?= 1h
 OHLCV_LOOKBACK_DAYS ?= 7
 
-# Temporal: live snapshot series (slow defaults for public RPC rate limits)
-SERIES_COUNT ?= 20
-SERIES_INTERVAL_SEC ?= 90
-SERIES_COOLDOWN_SEC ?= 20
+# Temporal: live snapshot series (conservative RPC backoff, then interval)
+SERIES_COUNT ?= 10
+SERIES_RPC_BACKOFF_SEC ?= 60
+SERIES_INTERVAL_SEC ?= 30
 SERIES_BINS_LEFT ?= 30
 SERIES_BINS_RIGHT ?= 30
 
 POOL_ARGS = --pool $(POOL)
 BINS_BOUNDED_ARGS = $(if $(BOUNDED),--bounded --bins-left $(BINS_LEFT) --bins-right $(BINS_RIGHT),)
+TEMPORAL_ARGS = $(POOL_ARGS) \
+	--timeframe $(OHLCV_TIMEFRAME) --lookback-days $(OHLCV_LOOKBACK_DAYS) \
+	--count $(SERIES_COUNT) --rpc-backoff-sec $(SERIES_RPC_BACKOFF_SEC) --interval-sec $(SERIES_INTERVAL_SEC) \
+	--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
 
 help:
 	@echo "Meteora bin atlas — common targets"
@@ -40,15 +44,18 @@ help:
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
 	@echo "Temporal sample (for animation)"
-	@echo "  make fetch-ohlcv        price candles (OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS)"
-	@echo "  make fetch-series       bounded snapshot series (SERIES_COUNT, SERIES_INTERVAL_SEC, SERIES_COOLDOWN_SEC)"
-	@echo "  make normalize-series   combined bin_atlas_series CSV"
-	@echo "  make temporal           fetch-ohlcv + fetch-series + normalize-series"
+	@echo "  make temporal           OHLCV + snapshot series + series CSV (one command)"
+	@echo "  make fetch-ohlcv        price candles only"
+	@echo "  make fetch-series       bounded snapshot series only"
+	@echo "  make normalize-series   normalize latest series manifest only"
+	@echo ""
+	@echo "Temporal knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
+	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC, SERIES_BINS_LEFT/RIGHT"
 	@echo ""
 	@echo "Notebook"
 	@echo "  make notebook         launch Jupyter notebook"
 	@echo ""
-	@echo "Override pool: make fetch-pool POOL=<address>"
+	@echo "Override pool: make temporal POOL=<address>"
 
 install: install-ts install-py
 
@@ -75,16 +82,17 @@ normalize-bins:
 
 atlas: discover fetch-pool fetch-bins normalize-bins
 
+temporal:
+	npm run temporal -- $(TEMPORAL_ARGS)
+
 fetch-ohlcv:
 	npm run fetch:ohlcv -- $(POOL_ARGS) --timeframe $(OHLCV_TIMEFRAME) --lookback-days $(OHLCV_LOOKBACK_DAYS)
 
 fetch-series:
-	npm run fetch:series -- $(POOL_ARGS) --count $(SERIES_COUNT) --interval-sec $(SERIES_INTERVAL_SEC) --cooldown-sec $(SERIES_COOLDOWN_SEC) --bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+	npm run fetch:series -- $(POOL_ARGS) --count $(SERIES_COUNT) --rpc-backoff-sec $(SERIES_RPC_BACKOFF_SEC) --interval-sec $(SERIES_INTERVAL_SEC) --bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
 
 normalize-series:
 	npm run normalize:series -- $(POOL_ARGS)
-
-temporal: fetch-ohlcv fetch-series normalize-series
 
 notebook:
 	poetry run jupyter notebook notebooks/01_connect_fetch_explore_meteora.ipynb

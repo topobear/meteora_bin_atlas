@@ -130,12 +130,16 @@ Reads the latest `data/raw/bin_arrays_<pool>_*.json` (or pass `--input <path>`) 
 Meteora datapi has **price/volume history** but not historical per-bin liquidity. Use both:
 
 ```bash
-# All three steps (defaults: 7d hourly OHLCV + 20 snapshots, 110s apart)
+# One command: OHLCV + snapshot series + series CSV
+# Defaults: 7d hourly OHLCV + 10 snapshots (60s RPC backoff, then 30s interval, ~14 min)
 make temporal POOL=<ADDRESS>
 
-# Or step by step (slow defaults for public RPC; use a private RPC for faster intervals)
-make fetch-ohlcv POOL=<ADDRESS> OHLCV_TIMEFRAME=1h OHLCV_LOOKBACK_DAYS=7
-make fetch-series POOL=<ADDRESS> SERIES_COUNT=20 SERIES_INTERVAL_SEC=90 SERIES_COOLDOWN_SEC=20
+# Or npm directly
+npm run temporal -- --pool <ADDRESS>
+
+# Step by step if needed
+make fetch-ohlcv POOL=<ADDRESS>
+make fetch-series POOL=<ADDRESS>
 make normalize-series POOL=<ADDRESS>
 ```
 

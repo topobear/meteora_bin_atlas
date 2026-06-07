@@ -21,7 +21,8 @@ export type SnapshotSeriesManifest = {
   series_started_at_utc: string;
   series_completed_at_utc: string;
   interval_sec: number;
-  cooldown_sec: number;
+  /** Conservative RPC backoff applied after each successful snapshot, before interval. */
+  rpc_backoff_sec: number;
   snapshot_count: number;
   bounded?: {
     left: number;
@@ -32,10 +33,10 @@ export type SnapshotSeriesManifest = {
 
 export type FetchSnapshotSeriesOptions = {
   count: number;
-  /** Seconds to wait between snapshots (after cooldown). */
+  /** Extra seconds to wait after RPC backoff before the next snapshot. */
   intervalSec: number;
-  /** Seconds to pause after each successful snapshot before interval wait. */
-  cooldownSec?: number;
+  /** Conservative RPC backoff after each successful snapshot (applied before interval). */
+  rpcBackoffSec?: number;
   projectRoot: string;
   bounded: {
     left: number;
@@ -43,7 +44,8 @@ export type FetchSnapshotSeriesOptions = {
   };
 };
 
-const RETRY_BACKOFF_SEC = [10, 30, 60, 120];
+/** Backoff when a snapshot RPC call fails (conservative, applied before retry). */
+const RETRY_BACKOFF_SEC = [15, 45, 90, 180];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,7 +61,7 @@ function formatFetchError(error: unknown): string {
     lower.includes("too many") ||
     lower.includes("rate limit")
   ) {
-    return `${message} (likely Solana RPC rate limit — slow down with --interval-sec / --cooldown-sec, or use a private RPC)`;
+    return `${message} (likely Solana RPC rate limit — increase --rpc-backoff-sec or use a private RPC)`;
   }
 
   return message;
@@ -83,11 +85,11 @@ async function fetchBoundedSnapshotWithRetry(
         break;
       }
 
-      const waitSec = RETRY_BACKOFF_SEC[attempt - 1] ?? 120;
+      const waitSec = RETRY_BACKOFF_SEC[attempt - 1] ?? 180;
       console.warn(
         `Snapshot fetch failed (attempt ${attempt}/${maxAttempts}): ${formatFetchError(error)}`,
       );
-      console.warn(`Retrying in ${waitSec}s...`);
+      console.warn(`Retry backoff ${waitSec}s...`);
       await sleep(waitSec * 1000);
     }
   }
@@ -115,6 +117,21 @@ async function writeSnapshotRaw(
   return { rawFilename, rawPath };
 }
 
+async function waitBeforeNextSnapshot(
+  rpcBackoffSec: number,
+  intervalSec: number,
+): Promise<void> {
+  if (rpcBackoffSec > 0) {
+    console.log(`RPC backoff ${rpcBackoffSec}s (rate-limit cushion)...`);
+    await sleep(rpcBackoffSec * 1000);
+  }
+
+  if (intervalSec > 0) {
+    console.log(`Interval ${intervalSec}s before next snapshot...`);
+    await sleep(intervalSec * 1000);
+  }
+}
+
 export async function fetchSnapshotSeries(
   connection: Connection,
   poolAddress: string,
@@ -122,7 +139,7 @@ export async function fetchSnapshotSeries(
 ): Promise<SnapshotSeriesManifest> {
   const seriesStartedAtUtc = new Date().toISOString();
   const snapshots: SnapshotSeriesEntry[] = [];
-  const cooldownSec = options.cooldownSec ?? 20;
+  const rpcBackoffSec = options.rpcBackoffSec ?? 60;
   const { left, right } = options.bounded;
 
   const dlmmPool = await DLMM.create(connection, new PublicKey(poolAddress));
@@ -144,9 +161,7 @@ export async function fetchSnapshotSeries(
     );
 
     if (index < options.count - 1) {
-      const waitSec = cooldownSec + options.intervalSec;
-      console.log(`Waiting ${waitSec}s before next snapshot (cooldown ${cooldownSec}s + interval ${options.intervalSec}s)...`);
-      await sleep(waitSec * 1000);
+      await waitBeforeNextSnapshot(rpcBackoffSec, options.intervalSec);
     }
   }
 
@@ -155,7 +170,7 @@ export async function fetchSnapshotSeries(
     series_started_at_utc: seriesStartedAtUtc,
     series_completed_at_utc: new Date().toISOString(),
     interval_sec: options.intervalSec,
-    cooldown_sec: cooldownSec,
+    rpc_backoff_sec: rpcBackoffSec,
     snapshot_count: options.count,
     bounded: options.bounded,
     snapshots,
