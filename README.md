@@ -4,6 +4,50 @@ A small **read-only research sketchbook** for exploring Meteora DLMM bin-level l
 
 This is not a trading bot, dashboard, Solana indexer, or production analytics product. It is a compact atlas of Meteora bins: connect via RPC, fetch pool/bin data, normalize snapshots, and visualize liquidity around the active bin.
 
+## Current status
+
+*Paused 2026-06-07 · branch `2026-06-07-nwqg` · example pool SOL-USDC (`5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6`)*
+
+### Working end-to-end
+
+| Pipeline | Command | Status |
+|----------|---------|--------|
+| Static atlas | `make atlas` | Steps 0–6 done — discover, fetch pool/bins, normalize CSV, Jupyter notebook |
+| Temporal / animation | `make poll-snapshots` → `make render-mp4` | Done once on SOL-USDC (10 bounded snapshots, ~14 min) |
+
+**Artifacts from the completed temporal run:**
+
+- `data/processed/bin_atlas_series_5rCf1DM8…_2026-06-07T08-18-59-514Z.csv`
+- `plots/temporal_5rCf1DM8…_2026-06-07T08-18-59-514Z.mp4`
+- `data/processed/pool_ohlcv_5rCf1DM8…_1h_2026-06-07T08-05-26-849Z.json`
+
+RPC defaults to Solana Foundation (no signup); bounded fetches are ~1s each. See [Improvements](#improvements) for endpoint benchmarks and faster polling knobs (`SERIES_RPC_BACKOFF_SEC`, `SERIES_INTERVAL_SEC`).
+
+### Left off / not done
+
+- **GAMEPLAN Step 7** — lightweight bin-distribution metrics (`bin_metrics_*.csv`, notebook section). Next planned feature work.
+- **GAMEPLAN Steps 8+** — snapshot comparison in notebook, public artifact compression, read-only swap quotes.
+- **37 extra raw snapshots** in `data/raw/` from ~11:42 UTC (rapid bounded-fetch experiments, ~1s apart) — not tied to a `snapshot_series` manifest; safe to ignore or delete before the next poll.
+- **Small cleanup** — `make temporal` alias (matches `npm run temporal`); RPC/backoff comments in `.env.example`.
+
+### Resume here
+
+```bash
+cp .env.example .env   # set SOLANA_RPC_URL if needed
+make install
+make smoke             # confirm RPC
+
+# Re-run temporal pipeline (faster example: ~2.5 min for 10 snapshots)
+make poll-snapshots SERIES_RPC_BACKOFF_SEC=5 SERIES_INTERVAL_SEC=10
+make render-mp4
+
+# Or static single snapshot + notebook
+make atlas
+make notebook
+```
+
+Theory notes added this session: [notes/dlmm_theory.md](notes/dlmm_theory.md) (V2/V3 → DLMM coordinate chart). Step-by-step plan: [GAMEPLAN.md](GAMEPLAN.md).
+
 ## What it does
 
 - Connects to Solana through an RPC URL (no local node required)
@@ -82,16 +126,17 @@ notes/         Domain notes and research log
 - [web3.js](https://solana-labs.github.io/solana-web3.js/)
 - [RPC HTTP methods](https://solana.com/docs/rpc/http)
 
-## Status
+## Pipeline reference
 
 - **Step 0** — TypeScript + Poetry skeleton, Solana RPC smoke test (`npm run smoke`)
 - **Step 1** — Domain notes and README (this document)
 - **Step 2** — Pool discovery (`npm run discover:pools` → `data/raw/pools_<timestamp>.json`, `data/processed/pool_candidates.csv`)
-- **Step 3** — Pool snapshot (`npm run fetch:pool -- --pool <ADDRESS>` → `data/raw/processed/pool_snapshot_<pool>_<timestamp>.json`)
+- **Step 3** — Pool snapshot (`npm run fetch:pool -- --pool <ADDRESS>` → `data/processed/pool_snapshot_<pool>_<timestamp>.json`)
 - **Step 4** — Bin arrays (`npm run fetch:bins -- --pool <ADDRESS>` → `data/raw/bin_arrays_<pool>_<timestamp>.json`)
 - **Step 5** — Bin atlas normalization (`npm run normalize:bins -- --pool <ADDRESS>` → `data/processed/bin_atlas_<pool>_<timestamp>.csv`)
 - **Step 6** — Jupyter notebook (`notebooks/01_connect_fetch_explore_meteora.ipynb`)
-- **Next** — Lightweight metrics (Step 7)
+- **Temporal** — OHLCV + snapshot series + series CSV + MP4 (`make poll-snapshots`, `make render-mp4`; scripts `fetch:ohlcv`, `fetch:series`, `normalize:series`, `temporal`)
+- **Next (GAMEPLAN Step 7)** — Lightweight bin-distribution metrics
 
 ### Pool discovery
 
@@ -145,3 +190,37 @@ make render-mp4
 ```
 
 Outputs: `data/processed/pool_ohlcv_<pool>_<tf>_*.json` and `data/processed/bin_atlas_series_<pool>_*.csv`.
+
+## Improvements
+
+Ideas and known bottlenecks from running the temporal / snapshot-polling pipeline.
+
+### RPC endpoints (free, no signup)
+
+Default in `.env.example` is Solana Foundation (`https://api.mainnet-beta.solana.com`). For bounded bin fetches (`getBinsAroundActiveBin`), it is the fastest no-signup option that works with the Meteora DLMM SDK (~1s per snapshot).
+
+| Endpoint | Works with DLMM? | Notes |
+|----------|------------------|-------|
+| Solana Foundation (default) | Yes | Fastest per-fetch; handles rapid bounded reads well |
+| [Solana Tracker](https://rpc.solanatracker.io/public) | Yes | No signup; ~2–3× slower per snapshot |
+| Ankr `https://rpc.ankr.com/solana` | No | Requires API key (403) |
+| PublicNode | No | Blocks some DLMM SDK filtered RPC calls (403) |
+| dRPC / Alchemy demo | No | Free tier blocks or demo key unavailable |
+
+**Best free upgrade (signup):** [Helius](https://helius.dev) or [QuickNode](https://quicknode.com) free tier — higher rate limits and more reliable for repeated polling. Set `SOLANA_RPC_URL` in `.env`.
+
+### Temporal polling speed
+
+The main wall-clock cost of `make poll-snapshots` is not RPC latency but the default pauses between snapshots: `SERIES_RPC_BACKOFF_SEC=60` + `SERIES_INTERVAL_SEC=30` → 90s between each of 10 snapshots (~14 min total). Each bounded fetch itself takes ~1s on Foundation RPC; 20 rapid back-to-back fetches succeeded without rate limits, so the 60s backoff is conservative for bounded mode.
+
+Faster runs without changing RPC:
+
+```bash
+make poll-snapshots SERIES_RPC_BACKOFF_SEC=5 SERIES_INTERVAL_SEC=10   # ~2.5 min for 10 snapshots
+make poll-snapshots SERIES_RPC_BACKOFF_SEC=0 SERIES_INTERVAL_SEC=5    # tighter; watch for 429s
+```
+
+### Other
+
+- Add `make temporal` as an alias for `make poll-snapshots` (matches `npm run temporal`).
+- Document RPC choice and backoff knobs in `.env.example` comments.
