@@ -1,0 +1,906 @@
+{
+  "discovery_method": "meteora_api",
+  "endpoint": "https://dlmm.datapi.meteora.ag/pools",
+  "legacy_endpoint_checked": "https://dlmm-api.meteora.ag/pair/all",
+  "warnings": [
+    "Legacy Meteora API https://dlmm-api.meteora.ag/pair/all returned HTTP 404; using https://dlmm.datapi.meteora.ag/pools instead."
+  ],
+  "response": {
+    "total": 114427,
+    "pages": 11443,
+    "current_page": 1,
+    "page_size": 10,
+    "data": [
+      {
+        "address": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+        "name": "SOL-USDC",
+        "token_x": {
+          "address": "So11111111111111111111111111111111111111112",
+          "name": "Wrapped SOL",
+          "symbol": "SOL",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 3820662,
+          "freeze_authority_disabled": true,
+          "total_supply": 627916565.2742344,
+          "price": 64.78581181053478,
+          "market_cap": 37488555283.74378
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "EYj9xKw6ZszwpyNibHY7JD5o3QgTVrSdcBp1fMJhrR9o",
+        "reserve_y": "CoaxzEh8p5YyGLcj36Eo3cUThVJxeKCs7qvLAGDYwBcz",
+        "token_x_amount": 39611.365922873,
+        "token_y_amount": 777617.887057,
+        "created_at": 1711766862000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 4,
+          "base_fee_pct": 0.04,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0.0038882,
+        "tvl": 3341523.136930488,
+        "current_price": 64.76094059478525,
+        "apr": 0.28987657656293314,
+        "apy": 187.634083444351,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 318775.86874424363,
+          "1h": 513119.30240880453,
+          "2h": 891341.9704881036,
+          "4h": 1634390.069212647,
+          "12h": 14047053.277910152,
+          "24h": 24945420.96621667
+        },
+        "fees": {
+          "30m": 127.63893759968,
+          "1h": 201.05777753077516,
+          "2h": 366.44849320318735,
+          "4h": 654.1911164475274,
+          "12h": 5376.406640781017,
+          "24h": 9686.292874392431
+        },
+        "protocol_fees": {
+          "30m": 14.136391421360614,
+          "1h": 22.270366252770273,
+          "2h": 40.55806788744304,
+          "4h": 72.30392467620969,
+          "12h": 594.9424312983344,
+          "24h": 1070.4079020816016
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.003819783145865891,
+          "1h": 0.006016950034213026,
+          "2h": 0.010966510725399487,
+          "4h": 0.019577632404139664,
+          "12h": 0.1608968850570272,
+          "24h": 0.28987657656293314
+        },
+        "cumulative_metrics": {
+          "volume": 22159803872.210106,
+          "fees": 9850747.543126754
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "9p3aRWnbu5vAmHXvsToMGfwmbkTJSwGr5G5xxSxmkB8N",
+        "name": "ANTFUN-USDT",
+        "token_x": {
+          "address": "CWZ6BsdnjkDVTGkmL6bGbJXXig6ceef12KvyGQW14cMt",
+          "name": "",
+          "symbol": "",
+          "decimals": 6,
+          "is_verified": false,
+          "holders": 66645,
+          "freeze_authority_disabled": true,
+          "total_supply": 9506588686.577286,
+          "price": 0.020311274328494493,
+          "market_cap": 192975093.3504216
+        },
+        "token_y": {
+          "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+          "name": "USDT",
+          "symbol": "USDT",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 2305507,
+          "freeze_authority_disabled": false,
+          "total_supply": 3839908057.357818,
+          "price": 0.9994875040354004,
+          "market_cap": 3837938469.522332
+        },
+        "reserve_x": "6ogw6Gn3gx7M5WWBtVxBWdWyGekrAb9ae63ZyMrVKwq8",
+        "reserve_y": "EoGUDQpX3KoZwiD4PPCFfjD5vWeGPmydgK1obacdomef",
+        "token_x_amount": 282978135.42124504,
+        "token_y_amount": 2095042.375322,
+        "created_at": 1777692714000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 80,
+          "base_fee_pct": 0.03,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0,
+        "tvl": 7839469.640229487,
+        "current_price": 0.020314203486708912,
+        "apr": 0.062481456725977734,
+        "apy": 25.606786590029884,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 339114.33455400635,
+          "1h": 813737.5615715352,
+          "2h": 1215009.2478877285,
+          "4h": 1920211.2873171032,
+          "12h": 2290501.554478239,
+          "24h": 16928249.759137332
+        },
+        "fees": {
+          "30m": 94.00247536720408,
+          "1h": 233.2570882438017,
+          "2h": 348.40707454141756,
+          "4h": 557.3617790295422,
+          "12h": 662.8221777518546,
+          "24h": 4898.21483080615
+        },
+        "protocol_fees": {
+          "30m": 8.34587135481297,
+          "1h": 20.726328026302227,
+          "2h": 31.189348882161163,
+          "4h": 51.05770459873848,
+          "12h": 60.929520224351776,
+          "24h": 437.26753022897054
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.0011990922815086293,
+          "1h": 0.0029754192432458163,
+          "2h": 0.004444268433077553,
+          "4h": 0.007109687320802308,
+          "12h": 0.008454936471090814,
+          "24h": 0.062481456725977734
+        },
+        "cumulative_metrics": {
+          "volume": 224965026.36973456,
+          "fees": 65165.95501349461
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "ANCx141SujgVdbKz9NTEH8F38qWsnyyXsVju64aU3qLB",
+        "name": "HYPE-USDC",
+        "token_x": {
+          "address": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+          "name": "HYPE",
+          "symbol": "HYPE",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 18313,
+          "freeze_authority_disabled": true,
+          "total_supply": 913137.905907303,
+          "price": 59.71558546144248,
+          "market_cap": 54528564.65829017
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "FBxH9wbh6kdv7bjKr1bXhBp2p2qwCkAoaMDNxQJNcsDN",
+        "reserve_y": "8WHjD4VzBKA1SJaWR3Ru2G3YGFfg1VcFZVvS5C8hQD8t",
+        "token_x_amount": 52012.15966939099,
+        "token_y_amount": 2312405.725308,
+        "created_at": 1761493812000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 20,
+          "base_fee_pct": 0.2,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 8.000000000000001e-7,
+        "tvl": 5413699.789703718,
+        "current_price": 59.654734811607824,
+        "apr": 0.4835934999440658,
+        "apy": 481.7449823865616,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 112603.94896955056,
+          "1h": 311167.8128745815,
+          "2h": 1045915.2859525468,
+          "4h": 1826460.166175043,
+          "12h": 6964235.237681334,
+          "24h": 14404874.900281752
+        },
+        "fees": {
+          "30m": 203.4227037707117,
+          "1h": 562.8740961443028,
+          "2h": 1899.92255114833,
+          "4h": 3312.2050067283826,
+          "12h": 12665.08540115342,
+          "24h": 26180.30028949274
+        },
+        "protocol_fees": {
+          "30m": 21.96864964825142,
+          "1h": 60.23500886918483,
+          "2h": 202.7234059179181,
+          "4h": 353.3116788069866,
+          "12h": 1360.6046150836028,
+          "24h": 2797.5792028621313
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.0037575541990267,
+          "1h": 0.010397216654215467,
+          "2h": 0.03509471572032459,
+          "4h": 0.06118191136176122,
+          "12h": 0.2339451002665694,
+          "24h": 0.4835934999440658
+        },
+        "cumulative_metrics": {
+          "volume": 467844099.08776647,
+          "fees": 872138.7422130534
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "7ubS3GccjhQY99AYNKXjNJqnXjaokEdfdV915xnCb96r",
+        "name": "cbBTC-USDC",
+        "token_x": {
+          "address": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+          "name": "Coinbase Wrapped BTC",
+          "symbol": "cbBTC",
+          "decimals": 8,
+          "is_verified": true,
+          "holders": 68657,
+          "freeze_authority_disabled": false,
+          "total_supply": 2966.56721437,
+          "price": 62087.21455363153,
+          "market_cap": 184173374.45613348
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "81GLeor2tJ9dut4YUE7BzGE4WfTtD4LbvMwLsrmw7wTg",
+        "reserve_y": "9mBxhiBNki6FjcmXeFGfKDf6o4fGXZ8JtG4jxNDeiv6u",
+        "token_x_amount": 7.81883192,
+        "token_y_amount": 1035700.112791,
+        "created_at": 1731019054000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 4,
+          "base_fee_pct": 0.04,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0.0014521999999999998,
+        "tvl": 1520329.392116859,
+        "current_price": 62061.68749152352,
+        "apr": 0.25566568226183756,
+        "apy": 153.9554976128386,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 143783.21066095715,
+          "1h": 274257.5151306697,
+          "2h": 666571.5965924927,
+          "4h": 1259743.1103728502,
+          "12h": 3847368.1828009863,
+          "24h": 10343132.878221205
+        },
+        "fees": {
+          "30m": 52.58857287914006,
+          "1h": 100.31493466714102,
+          "2h": 250.5455812309559,
+          "4h": 469.1725669652735,
+          "12h": 1450.1418708767033,
+          "24h": 3886.960512982815
+        },
+        "protocol_fees": {
+          "30m": 5.78650884244309,
+          "1h": 10.971755284760007,
+          "2h": 27.361858189742833,
+          "4h": 51.16724949659452,
+          "12h": 157.81391653744453,
+          "24h": 422.8617726647346
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.0034590249423460382,
+          "1h": 0.006598236881250164,
+          "2h": 0.016479690686115333,
+          "4h": 0.030859928736364978,
+          "12h": 0.09538340036020557,
+          "24h": 0.25566568226183756
+        },
+        "cumulative_metrics": {
+          "volume": 2136707850.711572,
+          "fees": 892607.6896976469
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "HcCbiQqc55uHtP2MJu7BYdVPi9s4j45R4zXcwRmJgCXX",
+        "name": "SOL-USDC",
+        "token_x": {
+          "address": "So11111111111111111111111111111111111111112",
+          "name": "Wrapped SOL",
+          "symbol": "SOL",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 3820662,
+          "freeze_authority_disabled": true,
+          "total_supply": 627916565.2742344,
+          "price": 64.78581181053478,
+          "market_cap": 37488555283.74378
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "GUFHzq2kxLpcx35vVBzR5a6owJ5Qqo5U8FXVA4JJKqV7",
+        "reserve_y": "4tjbbf12miEKCE7Er5zkaXzbG1VkPL1cuzY3FK4AgMBT",
+        "token_x_amount": 412.991886127,
+        "token_y_amount": 65645.225964,
+        "created_at": 1779540672000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 5,
+          "base_fee_pct": 0.01,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 10,
+          "collect_fee_mode": 1
+        },
+        "dynamic_fee_pct": 0.0021803,
+        "tvl": 92366.61834499217,
+        "current_price": 64.77627604733311,
+        "apr": 1.2777818366201543,
+        "apy": 10196.178169017998,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 156544.49667884802,
+          "1h": 275198.9061146349,
+          "2h": 572137.543067415,
+          "4h": 1189349.862929813,
+          "12h": 4515562.197331234,
+          "24h": 9804306.352555225
+        },
+        "fees": {
+          "30m": 18.00292374599486,
+          "1h": 30.571114192874173,
+          "2h": 72.20079992277746,
+          "4h": 138.47269285158777,
+          "12h": 502.90278047206834,
+          "24h": 1180.2438723125692
+        },
+        "protocol_fees": {
+          "30m": 1.9717984784166669,
+          "1h": 3.354103929840325,
+          "2h": 7.916699865746704,
+          "4h": 15.16513229432218,
+          "12h": 54.91589328393635,
+          "24h": 129.02411074823215
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.01949072518683469,
+          "1h": 0.033097578693083815,
+          "2h": 0.07816763373657921,
+          "4h": 0.1499163824904664,
+          "12h": 0.5444637786713279,
+          "24h": 1.2777818366201543
+        },
+        "cumulative_metrics": {
+          "volume": 55470433.70219242,
+          "fees": 8719.86692201824
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y",
+        "name": "SOL-USDC",
+        "token_x": {
+          "address": "So11111111111111111111111111111111111111112",
+          "name": "Wrapped SOL",
+          "symbol": "SOL",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 3820662,
+          "freeze_authority_disabled": true,
+          "total_supply": 627916565.2742344,
+          "price": 64.78581181053478,
+          "market_cap": 37488555283.74378
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "DwZz4S1Z1LBXomzmncQRVKCYhjCqSAMQ6RPKbUAadr7H",
+        "reserve_y": "4N22J4vW2juHocTntJNmXywSonYjkndCwahjZ2cYLDgb",
+        "token_x_amount": 29747.899719415,
+        "token_y_amount": 677569.541324,
+        "created_at": 1715468384000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 10,
+          "base_fee_pct": 0.1,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 1.0000000000000001e-7,
+        "tvl": 2601894.66060043,
+        "current_price": 64.72346869122407,
+        "apr": 0.30895971338022615,
+        "apy": 208.31890274138533,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 86904.40662542782,
+          "1h": 176952.35302331578,
+          "2h": 430424.4271808718,
+          "4h": 790347.7425670616,
+          "12h": 3368702.3508934486,
+          "24h": 8804008.824458852
+        },
+        "fees": {
+          "30m": 78.9494451426558,
+          "1h": 160.2946166432419,
+          "2h": 393.19718059941846,
+          "4h": 720.6565038782691,
+          "12h": 3070.9006001018774,
+          "24h": 8038.806285846496
+        },
+        "protocol_fees": {
+          "30m": 8.720524535857887,
+          "1h": 17.69818736509992,
+          "2h": 43.24206310442477,
+          "4h": 79.28977189493696,
+          "12h": 336.7601190737229,
+          "24h": 886.5624078998777
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.003034305974725238,
+          "1h": 0.006160688173527029,
+          "2h": 0.015111956166153236,
+          "4h": 0.027697374332286216,
+          "12h": 0.118025554477798,
+          "24h": 0.30895971338022615
+        },
+        "cumulative_metrics": {
+          "volume": 11408057919.14104,
+          "fees": 11331801.264218835
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "9ToMYnmEeYKc1AWYAFo8yjPKM1bt3vPhgw1U6qh9RxBd",
+        "name": "ZEC-USDC",
+        "token_x": {
+          "address": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+          "name": "Zcash",
+          "symbol": "ZEC",
+          "decimals": 8,
+          "is_verified": true,
+          "holders": 15991,
+          "freeze_authority_disabled": true,
+          "total_supply": 76977.49662475,
+          "price": 407.8994777759838,
+          "market_cap": 31399080.67373808
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "Cz6JgsgLtzdE2s725gv1akfoxP4r24rPQDXD8yYdoWQ9",
+        "reserve_y": "9cPLzuv4fSar2END2zak2QJnwXwJHmB8gJBJM3a9Zjfm",
+        "token_x_amount": 509.52577866,
+        "token_y_amount": 341724.516855,
+        "created_at": 1760842094000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 20,
+          "base_fee_pct": 0.2,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0.0032013,
+        "tvl": 549075.0651489077,
+        "current_price": 406.5748541900544,
+        "apr": 2.0009966581769896,
+        "apy": 138132.95277630203,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 286137.2143645355,
+          "1h": 698940.1230240978,
+          "2h": 976516.7931861588,
+          "4h": 1325276.8438260143,
+          "12h": 2566617.3443819336,
+          "24h": 5665220.758939731
+        },
+        "fees": {
+          "30m": 545.3478242407054,
+          "1h": 1573.8994480428971,
+          "2h": 2125.859199330506,
+          "4h": 2763.109716233397,
+          "12h": 5096.1138462066765,
+          "24h": 10986.973704512771
+        },
+        "protocol_fees": {
+          "30m": 56.64517921605478,
+          "1h": 164.63446873938514,
+          "2h": 222.85102303964936,
+          "4h": 290.3805958625226,
+          "12h": 534.6423201390678,
+          "24h": 1153.229380890323
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.09932117826053684,
+          "1h": 0.28664558781522154,
+          "2h": 0.38717095972186943,
+          "4h": 0.5032298662996195,
+          "12h": 0.9281269847547392,
+          "24h": 2.0009966581769896
+        },
+        "cumulative_metrics": {
+          "volume": 581554499.5455921,
+          "fees": 1144601.7170651015
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "GXWPY1XD7NMmH7UTy6FJArvnkzh4mmRf8bEYLxVZpjDp",
+        "name": "cbBTC-USDC",
+        "token_x": {
+          "address": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+          "name": "Coinbase Wrapped BTC",
+          "symbol": "cbBTC",
+          "decimals": 8,
+          "is_verified": true,
+          "holders": 68657,
+          "freeze_authority_disabled": false,
+          "total_supply": 2966.56721437,
+          "price": 62087.21455363153,
+          "market_cap": 184173374.45613348
+        },
+        "token_y": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USD Coin",
+          "symbol": "USDC",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 5248202,
+          "freeze_authority_disabled": false,
+          "total_supply": 8682462818.26419,
+          "price": 0.9996679119488654,
+          "market_cap": 8679579476.107824
+        },
+        "reserve_x": "GsdGWoDn3VzeEsVmRgjMWdUF5WwYVaYmgxHdF7GV1iWj",
+        "reserve_y": "6859iiAfVBqzUaodCuZaUAKGsQ8h1WHESL6R3Hh5cGLC",
+        "token_x_amount": 0.26854035,
+        "token_y_amount": 253975.821699,
+        "created_at": 1733829034000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 16,
+          "base_fee_pct": 0.03,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0,
+        "tvl": 270557.1078482482,
+        "current_price": 62020.95003727654,
+        "apr": 0.549472818077881,
+        "apy": 638.9690405785528,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 104302.73191663744,
+          "1h": 237456.2376990564,
+          "2h": 621760.3381985857,
+          "4h": 1159613.061873736,
+          "12h": 2301320.6902405955,
+          "24h": 5344034.241119795
+        },
+        "fees": {
+          "30m": 28.360427477759565,
+          "1h": 65.12246716815987,
+          "2h": 171.90224150203548,
+          "4h": 321.3476610379374,
+          "12h": 639.2994892165499,
+          "24h": 1486.637765003781
+        },
+        "protocol_fees": {
+          "30m": 3.1448776276970456,
+          "1h": 6.948238960064776,
+          "2h": 18.435133943748784,
+          "4h": 34.6105807928362,
+          "12h": 68.32704642512107,
+          "24h": 159.4084186090954
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.010482233382560602,
+          "1h": 0.02406976763097504,
+          "2h": 0.06353639823739286,
+          "4h": 0.11877258135763964,
+          "12h": 0.23629003662144565,
+          "24h": 0.549472818077881
+        },
+        "cumulative_metrics": {
+          "volume": 39032131.15922835,
+          "fees": 11066.285396515112
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "4zQTE5nVDtykQavfRh2u5Fy6c9G2mzvX5n1qqAzAoswM",
+        "name": "SOL-USD1",
+        "token_x": {
+          "address": "So11111111111111111111111111111111111111112",
+          "name": "Wrapped SOL",
+          "symbol": "SOL",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 3820662,
+          "freeze_authority_disabled": true,
+          "total_supply": 627916565.2742344,
+          "price": 64.78581181053478,
+          "market_cap": 37488555283.74378
+        },
+        "token_y": {
+          "address": "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
+          "name": "World Liberty Financial USD",
+          "symbol": "USD1",
+          "decimals": 6,
+          "is_verified": true,
+          "holders": 265081,
+          "freeze_authority_disabled": false,
+          "total_supply": 993400913.850339,
+          "price": 0.9994750089526068,
+          "market_cap": 992879387.2640954
+        },
+        "reserve_x": "9JnMNiVc6dogpBM8sL52VJBQyYqyGqBXr1hcaoZEY82u",
+        "reserve_y": "2EUNywMRWLggiQ4pijEtrFcTdEhpnvHJK9kiN8aqVwdm",
+        "token_x_amount": 33.635283048,
+        "token_y_amount": 105341.753809,
+        "created_at": 1758572495000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 10,
+          "base_fee_pct": 0.03,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0.0004,
+        "tvl": 107447.48426618904,
+        "current_price": 64.72346869122407,
+        "apr": 1.365892469133194,
+        "apy": 14042.451008978682,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 2630.73734974162,
+          "1h": 4736.6105022781485,
+          "2h": 10079.372080913115,
+          "4h": 56904.13317422892,
+          "12h": 1899562.2798155744,
+          "24h": 5188991.769921063
+        },
+        "fees": {
+          "30m": 0.7450716801601787,
+          "1h": 1.3247760531184145,
+          "2h": 2.8534470171804265,
+          "4h": 15.701484959904784,
+          "12h": 539.9551810999471,
+          "24h": 1467.6170958649495
+        },
+        "protocol_fees": {
+          "30m": 0.08265047903254805,
+          "1h": 0.14651378357846906,
+          "2h": 0.3148032177470973,
+          "4h": 1.7385746059398062,
+          "12h": 59.82775319573696,
+          "24h": 162.4225076509324
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.0006934286877432583,
+          "1h": 0.0012329521367260969,
+          "2h": 0.002655666660478837,
+          "4h": 0.014613171324706051,
+          "12h": 0.5025293842732222,
+          "24h": 1.365892469133194
+        },
+        "cumulative_metrics": {
+          "volume": 59970581.199179605,
+          "fees": 18925.5281720586
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      },
+      {
+        "address": "81GpCm4d13y8TozYtThabuSCLQN2o3bbrvDogXFPn8sA",
+        "name": "HYPE-SOL",
+        "token_x": {
+          "address": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+          "name": "HYPE",
+          "symbol": "HYPE",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 18313,
+          "freeze_authority_disabled": true,
+          "total_supply": 913137.905907303,
+          "price": 59.71558546144248,
+          "market_cap": 54528564.65829017
+        },
+        "token_y": {
+          "address": "So11111111111111111111111111111111111111112",
+          "name": "Wrapped SOL",
+          "symbol": "SOL",
+          "decimals": 9,
+          "is_verified": true,
+          "holders": 3820662,
+          "freeze_authority_disabled": true,
+          "total_supply": 627916565.2742344,
+          "price": 64.78581181053478,
+          "market_cap": 37488555283.74378
+        },
+        "reserve_x": "3KGotDRmG7D7vyNYtQGC9468azds4QnTwVyEB2TPsCVX",
+        "reserve_y": "HpdzsJNWmStGq29k22P1W7m7ZdpKXnHNExmiRkZekBtK",
+        "token_x_amount": 18353.43344199,
+        "token_y_amount": 9627.391875282,
+        "created_at": 1760126253000,
+        "reward_mint_x": "11111111111111111111111111111111",
+        "reward_mint_y": "11111111111111111111111111111111",
+        "pool_config": {
+          "bin_step": 20,
+          "base_fee_pct": 0.2,
+          "max_fee_pct": 0,
+          "protocol_fee_pct": 5,
+          "collect_fee_mode": 0
+        },
+        "dynamic_fee_pct": 0.00005,
+        "tvl": 1718450.5529060513,
+        "current_price": 0.9231901003222572,
+        "apr": 0.46095835593508055,
+        "apy": 435.8221269364247,
+        "has_farm": false,
+        "farm_apr": 0,
+        "farm_apy": 0,
+        "volume": {
+          "30m": 37437.19828107134,
+          "1h": 71095.3679549944,
+          "2h": 275522.0085971587,
+          "4h": 542365.0573800711,
+          "12h": 1738606.2812853442,
+          "24h": 4362748.020128671
+        },
+        "fees": {
+          "30m": 68.1518557326419,
+          "1h": 129.49699448447427,
+          "2h": 501.1833447801427,
+          "4h": 985.2585763780132,
+          "12h": 3164.211969381178,
+          "24h": 7921.3414162330355
+        },
+        "protocol_fees": {
+          "30m": 6.873850635694366,
+          "1h": 13.066345271589045,
+          "2h": 52.07675860820558,
+          "4h": 102.88375417583458,
+          "12h": 327.13540485405827,
+          "24h": 833.0053959878446
+        },
+        "fee_tvl_ratio": {
+          "30m": 0.0039658898312431,
+          "1h": 0.007535683483326503,
+          "2h": 0.029164839449851935,
+          "4h": 0.057334124319833014,
+          "12h": 0.1841316856065609,
+          "24h": 0.46095835593508055
+        },
+        "cumulative_metrics": {
+          "volume": 595307965.8370283,
+          "fees": 1126830.2559370275
+        },
+        "is_blacklisted": false,
+        "launchpad": "",
+        "tags": []
+      }
+    ]
+  }
+}
