@@ -6,17 +6,17 @@
 #                  Use for static notebook plots of current liquidity shape.
 #                  Output: data/processed/bin_atlas_<pool>_<ts>.csv
 #
-#   make temporal  Multi-snapshot sample for animation (OHLCV + live series).
+#   make poll-snapshots  Multi-snapshot sample for animation (OHLCV + live series).
 #                  Meteora datapi has price history; per-bin liquidity must be
 #                  polled from Solana RPC. Defaults are slow for public RPC.
 #                  Output: pool_ohlcv_*.json + bin_atlas_series_*.csv
 #                  (~14 min wall time: 10 snapshots × 90s pause)
 #
-# Override pool:  make atlas POOL=<address>
+# Override pool:  make atlas POOL=<address>  (default: SOL-USDC)
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series temporal atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots render-mp4 atlas notebook
 
 # Default pool: SOL-USDC from data/manual_pools.json
 POOL ?= 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
@@ -28,7 +28,7 @@ BINS_LEFT ?= 30
 BINS_RIGHT ?= 30
 BOUNDED ?=
 
-# --- Temporal (make temporal) -----------------------------------------------
+# --- Snapshot polling (make poll-snapshots) ---------------------------------
 
 # Price candles from Meteora datapi (no Solana RPC).
 OHLCV_TIMEFRAME ?= 1h
@@ -46,7 +46,7 @@ SERIES_BINS_RIGHT ?= 30
 
 POOL_ARGS = --pool $(POOL)
 BINS_BOUNDED_ARGS = $(if $(BOUNDED),--bounded --bins-left $(BINS_LEFT) --bins-right $(BINS_RIGHT),)
-TEMPORAL_ARGS = $(POOL_ARGS) \
+POLL_SNAPSHOTS_ARGS = $(POOL_ARGS) \
 	--timeframe $(OHLCV_TIMEFRAME) --lookback-days $(OHLCV_LOOKBACK_DAYS) \
 	--count $(SERIES_COUNT) --rpc-backoff-sec $(SERIES_RPC_BACKOFF_SEC) --interval-sec $(SERIES_INTERVAL_SEC) \
 	--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
@@ -69,13 +69,15 @@ help:
 	@echo "  make normalize-bins   bin atlas CSV"
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
-	@echo "Temporal sample (for animation)"
-	@echo "  make temporal           OHLCV + snapshot series + series CSV (one command)"
+	@echo "Snapshot polling (default pool: SOL-USDC)"
+	@echo "  make poll-snapshots     OHLCV + snapshot series + series CSV (one command)"
 	@echo "  make fetch-ohlcv        price candles only"
 	@echo "  make fetch-series       bounded snapshot series only"
 	@echo "  make normalize-series   normalize latest series manifest only"
+	@echo "  make render-mp4         MP4 from latest bin_atlas_series CSV (needs ffmpeg)"
 	@echo ""
-	@echo "Temporal knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
+	@echo "Poll knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
+	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4),"
 	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC, SERIES_BINS_LEFT/RIGHT"
 	@echo ""
 	@echo "Notebook"
@@ -115,11 +117,11 @@ normalize-bins:
 # End-to-end single snapshot. ~10–30s on a healthy RPC (full pool can be slower).
 atlas: discover fetch-pool fetch-bins normalize-bins
 
-# --- Temporal pipeline ------------------------------------------------------
+# --- Snapshot polling pipeline ----------------------------------------------
 
 # OHLCV + bounded snapshot series + series CSV in one npm script.
-temporal:
-	npm run temporal -- $(TEMPORAL_ARGS)
+poll-snapshots:
+	npm run temporal -- $(POLL_SNAPSHOTS_ARGS)
 
 # Meteora datapi only; fast (~seconds).
 fetch-ohlcv:
@@ -132,6 +134,14 @@ fetch-series:
 # Latest snapshot_series manifest → data/processed/bin_atlas_series_<pool>_<ts>.csv
 normalize-series:
 	npm run normalize:series -- $(POOL_ARGS)
+
+# Render latest bin_atlas_series CSV → plots/temporal_<pool>_<ts>.mp4 (requires ffmpeg)
+FRAME_DURATION ?= 1.0
+MP4_FPS ?= 10
+RENDER_ARGS = --frame-duration $(FRAME_DURATION) --fps $(MP4_FPS)
+
+render-mp4:
+	poetry run python -m meteora_bin_atlas.temporal.render --pool $(POOL) $(RENDER_ARGS)
 
 # --- Notebook ---------------------------------------------------------------
 

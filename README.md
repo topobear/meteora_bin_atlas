@@ -125,22 +125,23 @@ npm run normalize:bins -- --pool 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
 
 Reads the latest `data/raw/bin_arrays_<pool>_*.json` (or pass `--input <path>`) and writes a flat CSV with one row per bin.
 
-### Temporal sample (for animation)
+### Poll snapshots (for animation)
 
-Meteora datapi has **price/volume history** but not historical per-bin liquidity. Use both:
+Meteora datapi has **price/volume history** but not historical per-bin liquidity. Poll repeated on-chain snapshots:
 
 ```bash
 # One command: OHLCV + snapshot series + series CSV
-# Defaults: 7d hourly OHLCV + 10 snapshots (60s RPC backoff, then 30s interval, ~14 min)
-make temporal POOL=<ADDRESS>
+# Defaults: SOL-USDC pool, 7d hourly OHLCV + 10 snapshots (60s RPC backoff, then 30s interval, ~14 min)
+make poll-snapshots
 
-# Or npm directly
-npm run temporal -- --pool <ADDRESS>
+# Another pool
+make poll-snapshots POOL=<ADDRESS>
 
 # Step by step if needed
-make fetch-ohlcv POOL=<ADDRESS>
-make fetch-series POOL=<ADDRESS>
-make normalize-series POOL=<ADDRESS>
+make fetch-ohlcv
+make fetch-series
+make normalize-series
+make render-mp4
 ```
 
 Outputs: `data/processed/pool_ohlcv_<pool>_<tf>_*.json` and `data/processed/bin_atlas_series_<pool>_*.csv`.
