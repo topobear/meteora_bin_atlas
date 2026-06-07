@@ -36,10 +36,22 @@ function getCount(): number {
 function getIntervalSec(): number {
   const flagIndex = process.argv.indexOf("--interval-sec");
   const value =
-    flagIndex !== -1 && process.argv[flagIndex + 1] ? Number(process.argv[flagIndex + 1]) : 30;
+    flagIndex !== -1 && process.argv[flagIndex + 1] ? Number(process.argv[flagIndex + 1]) : 90;
 
   if (!Number.isFinite(value) || value < 0) {
     throw new Error("--interval-sec must be a non-negative number.");
+  }
+
+  return value;
+}
+
+function getCooldownSec(): number {
+  const flagIndex = process.argv.indexOf("--cooldown-sec");
+  const value =
+    flagIndex !== -1 && process.argv[flagIndex + 1] ? Number(process.argv[flagIndex + 1]) : 20;
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("--cooldown-sec must be a non-negative number.");
   }
 
   return value;
@@ -69,6 +81,7 @@ async function main(): Promise<void> {
   const poolAddress = getPoolAddress();
   const count = getCount();
   const intervalSec = getIntervalSec();
+  const cooldownSec = getCooldownSec();
   const bounded = getBoundedOptions();
   const connection = getConnection();
   const timestamp = formatTimestampForFilename();
@@ -76,17 +89,20 @@ async function main(): Promise<void> {
   const rawPath = path.join(process.cwd(), "data", "raw", `${fileStem}.json`);
   const processedPath = path.join(process.cwd(), "data", "processed", `${fileStem}.json`);
 
-  const durationSec = intervalSec * Math.max(count - 1, 0);
+  const pauseSec = cooldownSec + intervalSec;
+  const durationSec = pauseSec * Math.max(count - 1, 0);
   console.log(
-    `Collecting ${count} bounded snapshots (${bounded?.left}/${bounded?.right} bins), ` +
-      `${intervalSec}s apart (~${Math.round(durationSec / 60)} min wall time).`,
+    `Collecting ${count} bounded snapshots (${bounded.left}/${bounded.right} bins). ` +
+      `Pause ${pauseSec}s between snapshots (cooldown ${cooldownSec}s + interval ${intervalSec}s) ` +
+      `(~${Math.round(durationSec / 60)} min wall time).`,
   );
 
   const manifest = await fetchSnapshotSeries(connection, poolAddress, {
     count,
     intervalSec,
+    cooldownSec,
     projectRoot: process.cwd(),
-    fetchOptions: { bounded },
+    bounded,
   });
 
   await writeJson(rawPath, manifest);
@@ -94,7 +110,7 @@ async function main(): Promise<void> {
 
   console.log(`Pool: ${manifest.pool_address}`);
   console.log(`Snapshots: ${manifest.snapshot_count}`);
-  console.log(`Interval: ${manifest.interval_sec}s`);
+  console.log(`Interval: ${manifest.interval_sec}s | Cooldown: ${manifest.cooldown_sec}s`);
   console.log(`Raw output: ${rawPath}`);
   console.log(`Processed output: ${processedPath}`);
   console.log("Snapshot series fetch complete.");

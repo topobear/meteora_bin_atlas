@@ -13,9 +13,10 @@ BOUNDED ?=
 OHLCV_TIMEFRAME ?= 1h
 OHLCV_LOOKBACK_DAYS ?= 7
 
-# Temporal: live snapshot series
+# Temporal: live snapshot series (slow defaults for public RPC rate limits)
 SERIES_COUNT ?= 20
-SERIES_INTERVAL_SEC ?= 30
+SERIES_INTERVAL_SEC ?= 90
+SERIES_COOLDOWN_SEC ?= 20
 SERIES_BINS_LEFT ?= 30
 SERIES_BINS_RIGHT ?= 30
 
@@ -40,7 +41,7 @@ help:
 	@echo ""
 	@echo "Temporal sample (for animation)"
 	@echo "  make fetch-ohlcv        price candles (OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS)"
-	@echo "  make fetch-series       bounded snapshot series (SERIES_COUNT, SERIES_INTERVAL_SEC)"
+	@echo "  make fetch-series       bounded snapshot series (SERIES_COUNT, SERIES_INTERVAL_SEC, SERIES_COOLDOWN_SEC)"
 	@echo "  make normalize-series   combined bin_atlas_series CSV"
 	@echo "  make temporal           fetch-ohlcv + fetch-series + normalize-series"
 	@echo ""
@@ -78,7 +79,7 @@ fetch-ohlcv:
 	npm run fetch:ohlcv -- $(POOL_ARGS) --timeframe $(OHLCV_TIMEFRAME) --lookback-days $(OHLCV_LOOKBACK_DAYS)
 
 fetch-series:
-	npm run fetch:series -- $(POOL_ARGS) --count $(SERIES_COUNT) --interval-sec $(SERIES_INTERVAL_SEC) --bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+	npm run fetch:series -- $(POOL_ARGS) --count $(SERIES_COUNT) --interval-sec $(SERIES_INTERVAL_SEC) --cooldown-sec $(SERIES_COOLDOWN_SEC) --bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
 
 normalize-series:
 	npm run normalize:series -- $(POOL_ARGS)
