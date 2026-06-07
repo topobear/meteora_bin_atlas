@@ -923,6 +923,379 @@ Step 9 is complete when:
 * The project can be shown at a Solana hacker event without overclaiming.
 * The repo feels finished even if small.
 
+# Step 10 — Read-only swap quotes and slippage curves
+
+## Goal
+
+Add slippage computation as a final research layer.
+
+This step should estimate how output changes as input size increases, using Meteora DLMM quote functions or a conservative bin-walking approximation. It should remain read-only.
+
+This is not a trading bot.
+
+This step should not submit transactions, create swap instructions, use a wallet, hold private keys, or recommend trades.
+
+---
+
+## Conceptual purpose
+
+The bin atlas describes the static liquidity field.
+
+Slippage analysis asks:
+
+```text id="23stn2"
+If a hypothetical swap consumes this local liquidity field,
+how does execution quality degrade as size increases?
+```
+
+Interpretation:
+
+```text id="kthj9j"
+small input amount  → mostly local / active-bin execution
+large input amount  → crosses more bins
+crossed bins        → discrete path through the liquidity lattice
+slippage curve      → observed execution degradation as a function of size
+```
+
+The research object is the curve:
+
+```text id="eaat41"
+input size → expected output → execution price → price impact / slippage
+```
+
+---
+
+## Important distinction
+
+There are two different quantities:
+
+### 1. User slippage tolerance
+
+This is the tolerance a user gives to protect against worse-than-quoted execution between quote time and transaction execution.
+
+Example:
+
+```text id="s8qm1y"
+quote output = 100.0 token Y
+slippage tolerance = 0.5%
+minimum acceptable output = 99.5 token Y
+```
+
+### 2. Price impact / computed slippage
+
+This is the degradation caused by consuming liquidity across the DLMM bins.
+
+This project is interested in computed slippage / price impact as a microstructure measurement.
+
+Do not confuse these.
+
+---
+
+## Cursor instruction
+
+Implement Step 10 only.
+
+Add read-only quote and slippage analysis. Prefer the official Meteora DLMM SDK quote method if available and reliable. Do not implement real swaps. Do not create transactions. Do not add wallet logic.
+
+If the SDK quote function is hard to use, document why and implement a conservative offline placeholder that uses saved bin atlas data, clearly marked as experimental.
+
+---
+
+## SDK functions to investigate
+
+Start by inspecting the installed `@meteora-ag/dlmm` package and current Meteora docs.
+
+Potentially relevant functions:
+
+```ts id="kl1wpd"
+dlmmPool.swapQuote(...)
+dlmmPool.getBinArrayForSwap(...)
+```
+
+The exact signature may differ by SDK version, so do not assume blindly. Inspect the TypeScript definitions in `node_modules/@meteora-ag/dlmm`.
+
+Search locally:
+
+```bash id="fef6jw"
+grep -R "swapQuote" node_modules/@meteora-ag/dlmm -n | head -20
+grep -R "getBinArrayForSwap" node_modules/@meteora-ag/dlmm -n | head -20
+```
+
+Then check the SDK types before implementation.
+
+---
+
+## Required files
+
+```text id="ng2n5f"
+src/meteora/quoteSlippage.ts
+src/scripts/step10_quote_slippage.ts
+notebooks/01_connect_fetch_explore_meteora.ipynb
+notes/slippage_notes.md
+```
+
+Optional:
+
+```text id="d6uq34"
+data/processed/slippage_quotes_<pool>_<timestamp>.csv
+plots/slippage_curve_<pool>_<timestamp>.png
+```
+
+---
+
+## Command shape
+
+```bash id="n0dbl7"
+npm run quote:slippage -- --pool <POOL_ADDRESS> --mint-in <TOKEN_MINT> --direction yToX --amounts 0.1,0.5,1,2,5,10
+```
+
+or:
+
+```bash id="aubkyt"
+npm run quote:slippage -- --pool <POOL_ADDRESS> --token-in X --amounts 0.1,0.5,1,2,5,10
+```
+
+Use whichever is less fragile after inspecting SDK types.
+
+---
+
+## Output schema
+
+Write:
+
+```text id="dakjda"
+data/processed/slippage_quotes_<pool>_<timestamp>.csv
+```
+
+Columns:
+
+```text id="cv50kd"
+pool_address
+fetched_at_utc
+direction
+token_in_mint
+token_out_mint
+amount_in_ui
+amount_in_raw
+expected_amount_out_raw
+expected_amount_out_ui
+execution_price
+reference_price
+price_impact_pct
+computed_slippage_pct
+min_out_at_10bps
+min_out_at_50bps
+min_out_at_100bps
+bins_crossed
+quote_method
+raw_quote_json
+```
+
+Rules:
+
+* `amount_in_ui` is human-readable token amount.
+* `amount_in_raw` is integer base-unit amount.
+* Do not guess token decimals. Fetch decimals from mint accounts or require manual decimals.
+* `execution_price = expected_amount_out_ui / amount_in_ui`, adjusted for direction.
+* `reference_price` should be the active bin price if available.
+* `price_impact_pct` should compare execution price against active/reference price.
+* `computed_slippage_pct` may initially equal `price_impact_pct`, but document the convention.
+* `min_out_at_10bps`, `min_out_at_50bps`, `min_out_at_100bps` are tolerance-adjusted minimum outputs, not computed market slippage.
+* `bins_crossed` should be populated only if the SDK exposes this or if reliably inferred. Otherwise null.
+* `raw_quote_json` should preserve the quote object.
+
+---
+
+## Slippage formulas
+
+Use basis points for tolerance:
+
+```text id="0wwivn"
+1 bp = 0.01%
+10 bps = 0.10%
+50 bps = 0.50%
+100 bps = 1.00%
+```
+
+Minimum output under tolerance:
+
+```text id="1bi4bq"
+min_out = expected_out * (1 - tolerance_bps / 10000)
+```
+
+Execution price:
+
+```text id="ktyy79"
+execution_price = amount_out / amount_in
+```
+
+Price impact convention:
+
+```text id="wm901f"
+price_impact_pct = 100 * (reference_price - execution_price) / reference_price
+```
+
+If direction or price convention makes this sign wrong, fix it explicitly and document the convention in `notes/slippage_notes.md`.
+
+---
+
+## Notebook additions
+
+Add a final notebook section:
+
+```text id="t8agvj"
+## Read-only slippage analysis
+```
+
+Subsections:
+
+```text id="unnoz0"
+### What slippage means here
+### Generate quote sizes
+### Fetch read-only quotes
+### Load slippage quote table
+### Plot input size vs expected output
+### Plot input size vs computed slippage / price impact
+### Interpret the curve
+```
+
+Required notebook plot 1:
+
+```python id="d3t7bp"
+quotes = quotes.sort_values("amount_in_ui")
+
+plt.figure(figsize=(10, 5))
+plt.plot(quotes["amount_in_ui"], quotes["expected_amount_out_ui"], marker="o")
+plt.xlabel("Input amount")
+plt.ylabel("Expected output amount")
+plt.title("Expected output by input size")
+plt.tight_layout()
+plt.show()
+```
+
+Required notebook plot 2:
+
+```python id="g5d06n"
+plt.figure(figsize=(10, 5))
+plt.plot(quotes["amount_in_ui"], quotes["price_impact_pct"], marker="o")
+plt.xlabel("Input amount")
+plt.ylabel("Price impact (%)")
+plt.title("Read-only quoted price impact by input size")
+plt.tight_layout()
+plt.show()
+```
+
+Do not specify colors.
+
+---
+
+## `notes/slippage_notes.md`
+
+Create a concise note:
+
+```text id="lcr9ao"
+# Slippage notes
+
+## What this project computes
+
+This project computes read-only quote-based price impact across hypothetical input sizes.
+
+## What this project does not compute
+
+It does not execute swaps.
+It does not model transaction inclusion.
+It does not model MEV, latency, priority fees, or failed transactions.
+It does not recommend trades.
+
+## Slippage tolerance vs price impact
+
+Slippage tolerance is a user protection parameter.
+Price impact is the deterioration in execution price caused by consuming liquidity.
+
+## DLMM interpretation
+
+A swap consumes liquidity through one or more bins. Small trades may remain near the active bin. Larger trades may cross bins, creating a piecewise/discrete slippage curve.
+
+## Open questions
+
+- How many bins are crossed for each trade size?
+- Does the curve have visible kinks at bin boundaries?
+- How asymmetric are X-to-Y versus Y-to-X quotes?
+- How does slippage change over time as liquidity migrates?
+```
+
+---
+
+## Review checklist
+
+Step 10 is complete when:
+
+* The project can produce a slippage quote CSV for one selected pool.
+* The notebook plots expected output and price impact against input size.
+* The code remains read-only.
+* There is no wallet, no private key, no transaction signing, and no swap submission.
+* Token decimals are handled honestly.
+* Any SDK uncertainty is documented.
+* The analysis distinguishes slippage tolerance from quote-based price impact.
+
+---
+
+# Step 11 — Optional slippage surface over time
+
+## Goal
+
+Compare slippage curves across multiple snapshots or quote times.
+
+This is optional. Do not do this until Step 10 is stable.
+
+## Cursor instruction
+
+Implement Step 11 only if requested.
+
+Add a time comparison for slippage curves by running Step 10 more than once for the same pool.
+
+## Output
+
+```text id="a4zhbm"
+data/processed/slippage_surface_<pool>.csv
+```
+
+Columns:
+
+```text id="q8ebsq"
+pool_address
+quote_time_utc
+direction
+amount_in_ui
+expected_amount_out_ui
+price_impact_pct
+active_bin_id
+reference_price
+```
+
+## Notebook plot
+
+```python id="0mcn0g"
+for quote_time, group in surface.groupby("quote_time_utc"):
+    group = group.sort_values("amount_in_ui")
+    plt.plot(group["amount_in_ui"], group["price_impact_pct"], marker="o", label=quote_time)
+
+plt.xlabel("Input amount")
+plt.ylabel("Price impact (%)")
+plt.title("Slippage curve over time")
+plt.legend()
+plt.tight_layout()
+plt.show()
+```
+
+## Review checklist
+
+Step 11 is complete when:
+
+* Multiple quote times can be compared.
+* The notebook shows how the slippage curve changes over time.
+* The analysis is still read-only and non-trading.
+
 ---
 
 # Cursor operating protocol
