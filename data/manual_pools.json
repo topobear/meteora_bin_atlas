@@ -1,0 +1,14 @@
+{
+  "source": "manual",
+  "note": "Manually supplied pool addresses. Used when automated Meteora API/SDK discovery fails.",
+  "pools": [
+    {
+      "pool_address": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+      "note": "SOL-USDC; address from Meteora DLMM datapi /pools listing"
+    },
+    {
+      "pool_address": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq",
+      "note": "USDC-USDT; address from @meteora-ag/dlmm SDK README example"
+    }
+  ]
+}

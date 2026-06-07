@@ -4,7 +4,8 @@
   "description": "Read-only research sketchbook for Meteora DLMM bin-level liquidity on Solana",
   "private": true,
   "scripts": {
-    "smoke": "tsx src/scripts/step0_smoke.ts"
+    "smoke": "tsx src/scripts/step0_smoke.ts",
+    "discover:pools": "tsx src/scripts/step1_discover_pools.ts"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "^1.5.4",

@@ -83,4 +83,13 @@ notes/         Domain notes and research log
 
 - **Step 0** — TypeScript + Poetry skeleton, Solana RPC smoke test (`npm run smoke`)
 - **Step 1** — Domain notes and README (this document)
-- **Next** — Pool discovery, bin fetching, normalization, notebook
+- **Step 2** — Pool discovery (`npm run discover:pools` → `data/raw/pools_<timestamp>.json`, `data/processed/pool_candidates.csv`)
+- **Next** — Pool snapshot, bin fetching, normalization, notebook
+
+### Pool discovery
+
+```bash
+npm run discover:pools
+```
+
+Discovery order: Meteora datapi (`https://dlmm.datapi.meteora.ag/pools`), then SDK `DLMM.getLbPairs`, then `data/manual_pools.json`. The legacy `https://dlmm-api.meteora.ag/pair/all` endpoint is checked but currently returns 404; datapi is used instead.
