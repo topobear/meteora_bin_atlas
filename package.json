@@ -1,0 +1,21 @@
+{
+  "name": "meteora-bin-atlas",
+  "version": "0.1.0",
+  "description": "Read-only research sketchbook for Meteora DLMM bin-level liquidity on Solana",
+  "private": true,
+  "scripts": {
+    "smoke": "tsx src/scripts/step0_smoke.ts"
+  },
+  "dependencies": {
+    "@meteora-ag/dlmm": "^1.5.4",
+    "@solana/web3.js": "^1.98.2",
+    "bn.js": "^5.2.1",
+    "dotenv": "^16.5.0",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
