@@ -1,0 +1,19 @@
+[project]
+name = "meteora-bin-atlas"
+version = "0.1.0"
+description = "Visual study of DLMM liquidity geometry: sampling active-bin neighborhoods, rendering liquidity distributions, and tracking how liquidity landscapes evolve through time."
+authors = [
+    {name = "Ev",email = "214901612+almaxiong@users.noreply.github.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+]
+
+[tool.poetry]
+packages = [{ include = "meteora_bin_atlas" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
