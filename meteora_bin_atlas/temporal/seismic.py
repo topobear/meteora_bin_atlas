@@ -38,10 +38,27 @@ class SeismicStyle:
 
 
 @dataclass(frozen=True)
+class GlobalFrame:
+    """Fixed bin-id axis spanning the union of all snapshots in a series."""
+
+    bin_id_min: int
+    bin_id_max: int
+
+    @property
+    def bin_ids(self) -> np.ndarray:
+        return np.arange(self.bin_id_min, self.bin_id_max + 1, dtype=np.int32)
+
+    @property
+    def n_bins(self) -> int:
+        return int(self.bin_id_max - self.bin_id_min + 1)
+
+
+@dataclass(frozen=True)
 class SnapshotTrace:
     snapshot_index: int
     fetched_label: str
-    distances: np.ndarray
+    active_bin_id: int
+    bin_ids: np.ndarray
     liquidity: np.ndarray
     x_amount: np.ndarray
     y_amount: np.ndarray
@@ -54,40 +71,56 @@ class LayerStyle:
     outline_width: int
 
 
-def _bin_distances(zoom_bins: int) -> np.ndarray:
-    return np.arange(-zoom_bins, zoom_bins + 1, dtype=np.int32)
-
-
-def _column_for_distances(group: pd.DataFrame, zoom_bins: int, column: str) -> np.ndarray:
-    distances = _bin_distances(zoom_bins)
-    indexed = (
-        group.set_index("distance_from_active")[column]
-        .apply(pd.to_numeric, errors="coerce")
-        .fillna(0)
-    )
-    return indexed.reindex(distances, fill_value=0).to_numpy(dtype=np.float64)
-
-
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     value = hex_color.lstrip("#")
     return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
 
 
+def _resolve_global_frame(series_df: pd.DataFrame) -> GlobalFrame:
+    bin_ids = pd.to_numeric(series_df["bin_id"], errors="coerce").dropna().astype(int)
+    return GlobalFrame(bin_id_min=int(bin_ids.min()), bin_id_max=int(bin_ids.max()))
+
+
+def _active_bin_id(group: pd.DataFrame) -> int:
+    active_mask = group["is_active_bin"].astype(str).str.lower().eq("true")
+    if not active_mask.any():
+        active_mask = group["is_active_bin"] == True  # noqa: E712
+    if not active_mask.any():
+        raise ValueError("No active bin row in snapshot group")
+    return int(group.loc[active_mask, "bin_id"].iloc[0])
+
+
+def _column_for_bin_ids(group: pd.DataFrame, frame: GlobalFrame, column: str) -> np.ndarray:
+    indexed = (
+        group.set_index("bin_id")[column]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0)
+    )
+    return indexed.reindex(frame.bin_ids, fill_value=0).to_numpy(dtype=np.float64)
+
+
 def prepare_snapshot_traces(
     series_df: pd.DataFrame,
     *,
-    zoom_bins: int,
-) -> tuple[list[SnapshotTrace], float]:
-    """Align each snapshot to a fixed bin-distance grid and compute a global wiggle scale."""
+    zoom_bins: int | None = None,
+) -> tuple[list[SnapshotTrace], float, GlobalFrame]:
+    """
+    Align each snapshot to a fixed global bin-id grid.
+
+    zoom_bins is accepted for CLI compatibility but the axis spans all bin ids
+    observed across the series (union of bounded fetches).
+    """
+    _ = zoom_bins
+    frame = _resolve_global_frame(series_df)
     snapshot_indices = sorted(series_df["snapshot_index"].unique())
     traces: list[SnapshotTrace] = []
     liquidity_max = 0.0
 
     for snapshot_index in snapshot_indices:
         group = series_df[series_df["snapshot_index"] == snapshot_index]
-        liquidity = _column_for_distances(group, zoom_bins, "liquidity")
-        x_amount = _column_for_distances(group, zoom_bins, "x_amount")
-        y_amount = _column_for_distances(group, zoom_bins, "y_amount")
+        liquidity = _column_for_bin_ids(group, frame, "liquidity")
+        x_amount = _column_for_bin_ids(group, frame, "x_amount")
+        y_amount = _column_for_bin_ids(group, frame, "y_amount")
         liquidity_max = max(liquidity_max, float(liquidity.max()))
 
         fetched_at = group["fetched_at_utc"].iloc[0]
@@ -100,7 +133,8 @@ def prepare_snapshot_traces(
             SnapshotTrace(
                 snapshot_index=int(snapshot_index),
                 fetched_label=fetched_label,
-                distances=_bin_distances(zoom_bins),
+                active_bin_id=_active_bin_id(group),
+                bin_ids=frame.bin_ids,
                 liquidity=liquidity,
                 x_amount=x_amount,
                 y_amount=y_amount,
@@ -108,7 +142,7 @@ def prepare_snapshot_traces(
         )
 
     scale = liquidity_max * 1.05 if liquidity_max > 0 else 1.0
-    return traces, scale
+    return traces, scale, frame
 
 
 def _plot_background(plot_width: int, plot_height: int) -> np.ndarray:
@@ -123,28 +157,30 @@ def _plot_background(plot_width: int, plot_height: int) -> np.ndarray:
     return np.stack([r, g, b], axis=-1)
 
 
-def _bin_cell_width(*, zoom_bins: int, plot_left: int, plot_right: int) -> float:
-    return (plot_right - plot_left) / (2 * zoom_bins + 1)
+def _bin_cell_width(*, frame: GlobalFrame, plot_left: int, plot_right: int) -> float:
+    return (plot_right - plot_left) / frame.n_bins
 
 
-def _x_center_for_distance(
-    distance: int,
+def _x_center_for_bin_id(
+    bin_id: int,
     *,
-    zoom_bins: int,
+    frame: GlobalFrame,
     plot_left: int,
     cell_w: float,
 ) -> float:
-    return plot_left + (distance + zoom_bins + 0.5) * cell_w
+    index = int(bin_id - frame.bin_id_min)
+    return plot_left + (index + 0.5) * cell_w
 
 
-def _x_edge_for_distance(
-    distance: int,
+def _x_edge_for_bin_id(
+    bin_id: int,
     *,
-    zoom_bins: int,
+    frame: GlobalFrame,
     plot_left: int,
     cell_w: float,
 ) -> float:
-    return plot_left + (distance + zoom_bins) * cell_w
+    index = int(bin_id - frame.bin_id_min)
+    return plot_left + index * cell_w
 
 
 def _muted_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
@@ -164,13 +200,6 @@ def _ghost_alphas(layer_age: int) -> tuple[int, int]:
 
 
 def _layer_style(layer_age: int, transition_blend: float) -> LayerStyle:
-    """
-    Resolve draw style for a layer.
-
-    layer_age 0 = current snapshot (fades in on arrival).
-    layer_age 1 = previous snapshot (fades from current → ghost).
-    layer_age 2+ = progressively fainter fills and outlines.
-    """
     blend = max(0.0, min(1.0, transition_blend))
     ghost_fill, ghost_outline = _ghost_alphas(layer_age)
 
@@ -196,30 +225,44 @@ def _layer_style(layer_age: int, transition_blend: float) -> LayerStyle:
 def _draw_grid(
     draw: ImageDraw.ImageDraw,
     *,
-    zoom_bins: int,
+    frame: GlobalFrame,
     plot_box: tuple[int, int, int, int],
     style: SeismicStyle,
 ) -> None:
     left, top, right, bottom = plot_box
-    cell_w = _bin_cell_width(zoom_bins=zoom_bins, plot_left=left, plot_right=right)
+    cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
 
-    for distance in range(-zoom_bins, zoom_bins + 1):
-        x = _x_edge_for_distance(distance, zoom_bins=zoom_bins, plot_left=left, cell_w=cell_w)
-        color = style.grid_major if distance % 10 == 0 else style.grid_minor
+    for offset in range(frame.n_bins):
+        bin_id = frame.bin_id_min + offset
+        x = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=left, cell_w=cell_w)
+        color = style.grid_major if offset % 10 == 0 else style.grid_minor
         draw.line([(x, top), (x, bottom)], fill=color, width=1)
 
-    active_x = _x_center_for_distance(0, zoom_bins=zoom_bins, plot_left=left, cell_w=cell_w)
+
+def _draw_active_bin_marker(
+    draw: ImageDraw.ImageDraw,
+    *,
+    active_bin_id: int,
+    frame: GlobalFrame,
+    plot_box: tuple[int, int, int, int],
+    style: SeismicStyle,
+) -> float:
+    left, top, right, bottom = plot_box
+    cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
+    active_x = _x_center_for_bin_id(active_bin_id, frame=frame, plot_left=left, cell_w=cell_w)
     draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=2)
+    draw.text((active_x + 4, top + 4), f"active bin ({active_bin_id})", fill=style.hud)
+    return active_x
 
 
 def _draw_horizontal_wiggle_trace(
     draw: ImageDraw.ImageDraw,
     *,
     trace: SnapshotTrace,
+    frame: GlobalFrame,
     trace_y: float,
     liquidity_scale: float,
     max_deflection: float,
-    zoom_bins: int,
     plot_left: int,
     plot_right: int,
     layer: LayerStyle,
@@ -228,19 +271,19 @@ def _draw_horizontal_wiggle_trace(
     if layer.fill_alpha <= 0 and layer.outline_alpha <= 0:
         return
 
-    cell_w = _bin_cell_width(zoom_bins=zoom_bins, plot_left=plot_left, plot_right=plot_right)
+    cell_w = _bin_cell_width(frame=frame, plot_left=plot_left, plot_right=plot_right)
     wiggle_points: list[tuple[float, float]] = []
     empty_rgb = _hex_to_rgb(SEISMIC_TOKEN_COLORS["empty"])
 
-    for distance, liquidity, x_amount, y_amount in zip(
-        trace.distances,
+    for bin_id, liquidity, x_amount, y_amount in zip(
+        trace.bin_ids,
         trace.liquidity,
         trace.x_amount,
         trace.y_amount,
         strict=True,
     ):
-        dist = int(distance)
-        x_center = _x_center_for_distance(dist, zoom_bins=zoom_bins, plot_left=plot_left, cell_w=cell_w)
+        bin_id = int(bin_id)
+        x_center = _x_center_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w)
         offset = (float(liquidity) / liquidity_scale) * max_deflection
         peak_y = trace_y - offset
         wiggle_points.append((x_center, peak_y))
@@ -248,17 +291,18 @@ def _draw_horizontal_wiggle_trace(
         if layer.fill_alpha <= 0:
             continue
 
+        distance = bin_id - trace.active_bin_id
         color_hex = bar_color_for_bin(
             float(x_amount),
             float(y_amount),
-            dist,
+            distance,
             colors=SEISMIC_TOKEN_COLORS,
         )
         rgb = _muted_rgb(color_hex, layer_age=layer_age)
         if rgb == empty_rgb:
             continue
 
-        x_left = _x_edge_for_distance(dist, zoom_bins=zoom_bins, plot_left=plot_left, cell_w=cell_w)
+        x_left = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w)
         x_right = x_left + cell_w
         polygon = [(x_left, trace_y), (x_left, peak_y), (x_right, peak_y), (x_right, trace_y)]
         draw.polygon(polygon, fill=(*rgb, layer.fill_alpha))
@@ -275,9 +319,10 @@ def _draw_horizontal_wiggle_trace(
 def render_seismic_frame(
     traces: list[SnapshotTrace],
     *,
+    frame: GlobalFrame,
     current_index: int,
     transition_blend: float = 1.0,
-    zoom_bins: int,
+    zoom_bins: int | None = None,
     liquidity_scale: float,
     token_x: str,
     token_y: str,
@@ -286,7 +331,8 @@ def render_seismic_frame(
     height: int = 800,
     style: SeismicStyle = SeismicStyle(),
 ) -> np.ndarray:
-    """Render the blackboard: current skyline over fading ghost traces at the same baseline."""
+    """Render the blackboard in a fixed global bin-id frame; active bin marker slides."""
+    _ = zoom_bins
     current_index = max(0, min(current_index, len(traces) - 1))
     total_traces = len(traces)
 
@@ -297,7 +343,7 @@ def render_seismic_frame(
     img.paste(plot_bg, (left, top))
 
     draw = ImageDraw.Draw(img, "RGBA")
-    _draw_grid(draw, zoom_bins=zoom_bins, plot_box=plot_box, style=style)
+    _draw_grid(draw, frame=frame, plot_box=plot_box, style=style)
 
     trace_y = float(bottom)
     max_deflection = (bottom - top) * CURRENT_DEFLECTION_RATIO
@@ -309,26 +355,31 @@ def render_seismic_frame(
         _draw_horizontal_wiggle_trace(
             draw,
             trace=traces[layer_index],
+            frame=frame,
             trace_y=trace_y,
             liquidity_scale=liquidity_scale,
             max_deflection=max_deflection,
-            zoom_bins=zoom_bins,
             plot_left=left,
             plot_right=right,
             layer=layer,
             layer_age=layer_age,
         )
 
-    cell_w = _bin_cell_width(zoom_bins=zoom_bins, plot_left=left, plot_right=right)
-    active_x = _x_center_for_distance(0, zoom_bins=zoom_bins, plot_left=left, cell_w=cell_w)
-    draw.text((active_x + 4, top + 4), "active bin", fill=style.hud)
+    current = traces[current_index]
+    _draw_active_bin_marker(
+        draw,
+        active_bin_id=current.active_bin_id,
+        frame=frame,
+        plot_box=plot_box,
+        style=style,
+    )
 
     axis_y = height - 72
-    draw.text((left, axis_y), f"-{zoom_bins}", fill=style.hud)
-    draw.text((right - 36, axis_y), f"+{zoom_bins}", fill=style.hud)
+    draw.text((left, axis_y), str(frame.bin_id_min), fill=style.hud)
+    draw.text((right - 52, axis_y), str(frame.bin_id_max), fill=style.hud)
     draw.text(
-        (left + (right - left) / 2 - 95, axis_y),
-        "distance from active bin",
+        (left + (right - left) / 2 - 70, axis_y),
+        "bin id (global lattice)",
         fill=style.hud,
     )
 
@@ -340,7 +391,6 @@ def render_seismic_frame(
             fill=(*style.hud[:3], 140),
         )
 
-    current = traces[current_index]
     title = "DLMM liquidity seismogram"
     subtitle = (
         f"{token_x}/{token_y} · {pool_address[:6]}…{pool_address[-4:]} · "

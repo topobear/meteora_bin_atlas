@@ -59,7 +59,10 @@ def build_temporal_mp4(
         raise ValueError(f"No rows found in {series_source}")
 
     token_x, token_y = resolve_token_labels(pool_address, processed_dir)
-    traces, liquidity_scale = prepare_snapshot_traces(series_df, zoom_bins=zoom_bins)
+    traces, liquidity_scale, global_frame = prepare_snapshot_traces(
+        series_df,
+        zoom_bins=zoom_bins,
+    )
 
     if not traces:
         raise ValueError(f"No snapshots found in {series_source}")
@@ -79,6 +82,7 @@ def build_temporal_mp4(
                 blend = min(1.0, (frame_i + 1) / fade_frames)
             rgb = render_seismic_frame(
                 traces,
+                frame=global_frame,
                 current_index=current_index,
                 transition_blend=blend,
                 zoom_bins=zoom_bins,
