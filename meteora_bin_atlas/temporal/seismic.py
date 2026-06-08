@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -57,7 +58,7 @@ class SeismicStyle:
     background: tuple[int, int, int] = (0, 0, 0)
     grid_major: tuple[int, int, int, int] = (60, 80, 100, 35)
     baseline: tuple[int, int, int, int] = (80, 100, 120, 90)
-    active_bin: tuple[int, int, int, int] = (232, 244, 255, 180)
+    active_bin: tuple[int, int, int, int] = (255, 255, 255, 255)
     hud: tuple[int, int, int, int] = (190, 210, 230, 255)
     wiggle_outline: tuple[int, int, int, int] = (232, 244, 255, 220)
 
@@ -193,8 +194,8 @@ def _padded_bounds(lo: int, hi: int) -> tuple[int, int]:
     return center - half, center + half
 
 
-def _rolling_content_bounds(traces: list[SnapshotTrace], current_index: int) -> tuple[int, int]:
-    """Union of observed bin spans across the recent snapshot window."""
+def _rolling_observed_bounds(traces: list[SnapshotTrace], current_index: int) -> tuple[int, int]:
+    """Union of bins with liquidity (plus active) across the recent snapshot window."""
     start = max(0, current_index - ROLLING_SNAPSHOTS + 1)
     lo = int(traces[start].active_bin_id)
     hi = lo
@@ -202,6 +203,12 @@ def _rolling_content_bounds(traces: list[SnapshotTrace], current_index: int) -> 
         trace_lo, trace_hi = _observed_extent(trace)
         lo = min(lo, trace_lo)
         hi = max(hi, trace_hi)
+    return lo, hi
+
+
+def _rolling_content_bounds(traces: list[SnapshotTrace], current_index: int) -> tuple[int, int]:
+    """Padded rolling bounds used for zoom-out decisions."""
+    lo, hi = _rolling_observed_bounds(traces, current_index)
     return _padded_bounds(lo, hi)
 
 
@@ -211,39 +218,81 @@ def _clamp_to_atlas(lo: int, hi: int, atlas: GlobalFrame | None) -> tuple[int, i
     return max(atlas.bin_id_min, lo), min(atlas.bin_id_max, hi)
 
 
-def _center_frame_on_active(
-    display_lo: int,
-    display_hi: int,
+def _desired_display_span(
+    traces: list[SnapshotTrace],
+    current_index: int,
+    previous: GlobalFrame | None,
+    *,
+    content_lo: int,
+    content_hi: int,
+) -> int:
+    """Viewport width: grow only when centered window no longer fits content."""
+    content_span = content_hi - content_lo + 1
+    if previous is None:
+        return max(content_span, MIN_DISPLAY_BINS)
+
+    prev_span = previous.n_bins
+    if content_span < ZOOM_IN_RATIO * prev_span:
+        return max(content_span, MIN_DISPLAY_BINS)
+
+    active_bin_id = int(traces[current_index].active_bin_id)
+    half = (prev_span - 1) // 2
+    centered_lo = active_bin_id - half
+    centered_hi = centered_lo + prev_span - 1
+    if content_lo >= centered_lo and content_hi <= centered_hi:
+        return prev_span
+
+    return max(prev_span, content_span, MIN_DISPLAY_BINS)
+
+
+def _frame_centered_on_active(
+    span: int,
     *,
     active_bin_id: int,
     content_lo: int,
     content_hi: int,
     atlas: GlobalFrame | None,
 ) -> tuple[int, int]:
-    """Keep the active-bin marker near plot center while content remains visible."""
-    span = display_hi - display_lo + 1
-    half = span // 2
-    centered_lo = active_bin_id - half
-    centered_hi = centered_lo + span - 1
+    """Pick integer bin bounds that pixel-center the active bin when possible."""
+    min_span = max(content_hi - content_lo + 1, MIN_DISPLAY_BINS)
+    max_span = span
+    if atlas is not None:
+        max_span = min(max_span, atlas.bin_id_max - atlas.bin_id_min + 1)
 
-    if content_lo < centered_lo:
-        shift = content_lo - centered_lo
-        centered_lo += shift
-        centered_hi += shift
-    if content_hi > centered_hi:
-        shift = content_hi - centered_hi
-        centered_lo += shift
-        centered_hi += shift
+    best_lo = content_lo
+    best_hi = content_hi
+    best_err = float("inf")
+    best_span = max_span
 
-    centered_lo, centered_hi = _clamp_to_atlas(centered_lo, centered_hi, atlas)
-    if active_bin_id < centered_lo:
-        centered_hi += centered_lo - active_bin_id
-        centered_lo = active_bin_id
-    elif active_bin_id > centered_hi:
-        centered_lo -= active_bin_id - centered_hi
-        centered_hi = active_bin_id
+    for try_span in range(min_span, max_span + 1):
+        ideal_lo = active_bin_id + 0.5 - try_span / 2
+        for lo in {int(math.floor(ideal_lo)), int(math.ceil(ideal_lo))}:
+            hi = lo + try_span - 1
+            if lo > content_lo or hi < content_hi:
+                continue
+            if atlas is not None and (lo < atlas.bin_id_min or hi > atlas.bin_id_max):
+                continue
+            err = abs((active_bin_id - lo) + 0.5 - try_span / 2)
+            if err < best_err or (math.isclose(err, best_err) and try_span < best_span):
+                best_err = err
+                best_lo = lo
+                best_hi = hi
+                best_span = try_span
 
-    return _clamp_to_atlas(centered_lo, centered_hi, atlas)
+    if math.isfinite(best_err):
+        return best_lo, best_hi
+
+    lo = active_bin_id - (max_span - 1) // 2
+    hi = lo + max_span - 1
+    if content_lo < lo:
+        shift = content_lo - lo
+        lo += shift
+        hi += shift
+    if content_hi > hi:
+        shift = content_hi - hi
+        lo += shift
+        hi += shift
+    return _clamp_to_atlas(lo, hi, atlas)
 
 
 def compute_display_frame(
@@ -257,30 +306,26 @@ def compute_display_frame(
     Update the visible bin-id viewport.
 
     Zooms out when the rolling window escapes the current frame; zooms in when
-    the rolling window is much narrower than what is currently shown. Recenters
-    on the active bin so the marker stays in the middle of the plot.
+    the rolling window is much narrower than what is currently shown. Keeps the
+    active bin on the plot center instead of monotonically expanding to atlas width.
     """
-    content_lo, content_hi = _rolling_content_bounds(traces, current_index)
-    content_lo, content_hi = _clamp_to_atlas(content_lo, content_hi, atlas)
+    padded_lo, padded_hi = _rolling_content_bounds(traces, current_index)
+    padded_lo, padded_hi = _clamp_to_atlas(padded_lo, padded_hi, atlas)
+    observed_lo, observed_hi = _rolling_observed_bounds(traces, current_index)
+    observed_lo, observed_hi = _clamp_to_atlas(observed_lo, observed_hi, atlas)
     active_bin_id = int(traces[current_index].active_bin_id)
-
-    if previous is None:
-        display_lo, display_hi = content_lo, content_hi
-    else:
-        display_lo = min(previous.bin_id_min, content_lo)
-        display_hi = max(previous.bin_id_max, content_hi)
-
-        content_span = content_hi - content_lo + 1
-        display_span = display_hi - display_lo + 1
-        if content_span < ZOOM_IN_RATIO * display_span:
-            display_lo, display_hi = content_lo, content_hi
-
-    display_lo, display_hi = _center_frame_on_active(
-        display_lo,
-        display_hi,
+    span = _desired_display_span(
+        traces,
+        current_index,
+        previous,
+        content_lo=padded_lo,
+        content_hi=padded_hi,
+    )
+    display_lo, display_hi = _frame_centered_on_active(
+        span,
         active_bin_id=active_bin_id,
-        content_lo=content_lo,
-        content_hi=content_hi,
+        content_lo=observed_lo,
+        content_hi=observed_hi,
         atlas=atlas,
     )
     return GlobalFrame(bin_id_min=display_lo, bin_id_max=display_hi)
@@ -407,13 +452,21 @@ def _draw_active_bin_marker(
 ) -> float:
     left, top, right, bottom = plot_box
     cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
+    # Draw at the active bin's true data position so the marker always sits on the
+    # active liquidity column (never force-snapped to plot center, which detaches it).
     active_x = round(
         _x_center_for_bin_id(active_bin_id, frame=frame, plot_left=left, cell_w=cell_w)
     )
-    draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=2)
-    tick = 6
-    draw.line([(active_x - tick, top), (active_x + tick, top)], fill=style.active_bin, width=2)
-    draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=style.active_bin, width=2)
+    half = max(4.0, cell_w / 2.0)
+    # Thick translucent band spanning the active bin cell — the "spanning" bar that is
+    # always present, regardless of whether the active bin happens to hold both tokens.
+    draw.rectangle([active_x - half, top, active_x + half, bottom], fill=(255, 255, 255, 80))
+    # Crisp center line with a dark backing so it stays visible over bright fills.
+    draw.line([(active_x, top), (active_x, bottom)], fill=(0, 0, 0, 150), width=5)
+    draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=3)
+    tick = 8
+    draw.line([(active_x - tick, top), (active_x + tick, top)], fill=style.active_bin, width=3)
+    draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=style.active_bin, width=3)
     draw.text(
         (active_x + 6, top + 4),
         f"ACTIVE {active_bin_id}",
