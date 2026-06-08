@@ -95,6 +95,9 @@ def build_temporal_mp4(
     if not traces:
         raise ValueError(f"No snapshots found in {series_source}")
 
+    # Per-bin spot price (USDC per SOL), used for the live spot headline ticker.
+    price_for_bin = build_price_map(series_df)
+
     trace_indices = list(range(len(traces)))
     if one_frame_per_snapshot and output_frames is not None:
         trace_indices = subsample_trace_indices(len(traces), output_frames)
@@ -145,6 +148,7 @@ def build_temporal_mp4(
                 token_x=token_x,
                 token_y=token_y,
                 pool_address=pool_address,
+                price_for_bin=price_for_bin,
                 width=width,
                 height=height,
             )
@@ -188,7 +192,7 @@ def build_temporal_mp4(
             fade_fraction=fade_fraction,
             one_frame_per_snapshot=one_frame_per_snapshot,
             liquidity_scale=liquidity_scale,
-            price_for_bin=build_price_map(series_df),
+            price_for_bin=price_for_bin,
             token_x=token_x,
             token_y=token_y,
             pool_address=pool_address,

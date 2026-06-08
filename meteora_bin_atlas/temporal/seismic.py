@@ -15,7 +15,7 @@ from meteora_bin_atlas.explore.labels import bar_color_for_bin
 
 # Skyline rises from the plot floor; this fraction caps peak height below the top margin.
 CURRENT_DEFLECTION_RATIO = 0.86
-GHOST_HISTORY = 12
+GHOST_HISTORY = 8
 ROLLING_SNAPSHOTS = 5
 DISPLAY_PAD_BINS = 4
 ZOOM_IN_RATIO = 0.72
@@ -25,12 +25,13 @@ MIN_DISPLAY_BINS = 25
 VIEWPORT_EDGE_BAND = 10
 CURRENT_FILL_ALPHA = 150     # NOW frame: solidly colored so there is color to fade from
 CURRENT_OUTLINE_ALPHA = 235
-# Colored ghost fills fade GRADUALLY over the full history so the trail is a
-# visible "comet" of the distribution's recent color, decaying toward black.
-GHOST_FILL_BASE = 165        # age-1 sits just above NOW fill, so afterimages read strongly
-GHOST_FILL_DECAY = 0.84      # 165→139→117→98→82→69→58→49→41→34→29 across ages 1-11
-GHOST_OUTLINE_BASE = 175
-GHOST_OUTLINE_DECAY = 0.80   # gentle outline fade tracking the fill
+# Colored ghost fills collapse FAST: an afterimage should darken to grey and
+# vanish within a couple of snapshots so the eye locks onto the live active bar
+# rather than a long white smear of stale markers.
+GHOST_FILL_BASE = 120        # age-1 already well below NOW fill
+GHOST_FILL_DECAY = 0.42      # 120→50→21→9→4→… effectively gone by age 4
+GHOST_OUTLINE_BASE = 130
+GHOST_OUTLINE_DECAY = 0.45   # outline fade tracking the fill
 GHOST_FILL_CUTOFF_AGE = 99   # no hard cutoff — let the gradual decay run the whole trail
 GHOST_TRACE_Y_OFFSET = 3.0
 GHOST_TRACE_X_DRIFT = 0.35
@@ -358,9 +359,9 @@ def _layer_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
     if layer_age <= 0:
         return rgb
     bg = SeismicStyle.background
-    # Gentle hue dimming; the alpha decay in _ghost_alphas carries most of the
-    # fade so the color stays recognisable (e.g. dim cyan) along the trail.
-    mute = 0.92**layer_age
+    # Aggressive hue dimming: a bar drops toward grey/black within a frame or two
+    # so afterimages read as faint ghosts, not solid white columns.
+    mute = 0.5**layer_age
     return tuple(int(bg[i] + (rgb[i] - bg[i]) * mute) for i in range(3))
 
 
@@ -676,11 +677,49 @@ def _draw_drift_seismograph(
     draw.line([(DRIFT_STRIP_LEFT, ny), (DRIFT_STRIP_RIGHT, ny)], fill=(255, 255, 255, 70), width=1)
     draw.ellipse([nx - 4, ny - 4, nx + 4, ny + 4], fill=(255, 255, 255, 255))
 
-    # Stronger, bold all-caps DRIFT header (double-struck for weight).
-    label_font = _load_mono_font(24)
+    # Bold all-caps DRIFT header (double-struck for weight); the spot headline
+    # ticker sits just above it.
+    label_font = _load_mono_font(20)
     label_xy = (DRIFT_STRIP_LEFT - 2, top - 24)
     for dx in (0, 1):
         draw.text((label_xy[0] + dx, label_xy[1]), "DRIFT", fill=(235, 246, 255, 255), font=label_font)
+
+
+def _draw_price_ticker(
+    draw: ImageDraw.ImageDraw,
+    *,
+    spot_price: float,
+    prev_price: float | None,
+    token_x: str,
+    token_y: str,
+) -> None:
+    """In-place spot headline stacked on top of the drift box: ``USDC/SOL``.
+
+    The number is the active-bin ``price_per_token`` and is redrawn every frame
+    (updates in place); the box tints green/red by the move versus the previous
+    snapshot's spot.
+    """
+    label_text = f"{token_y}/{token_x}"
+    price_text = f"{spot_price:,.2f}"
+
+    label_font = _load_mono_font(13)
+    price_font = _load_mono_font(30)
+
+    up = prev_price is None or spot_price >= prev_price
+    accent = (60, 230, 150) if up else (255, 92, 110)
+
+    label_bbox = label_font.getbbox(label_text)
+    price_bbox = price_font.getbbox(price_text)
+
+    left_x = DRIFT_STRIP_LEFT - 3
+    label_y = 3
+    price_y = 17
+    content_w = max(label_bbox[2], price_bbox[2])
+    panel = [left_x - 2, 1, left_x + content_w + 8, price_y + price_bbox[3] + 4]
+    draw.rectangle(panel, fill=(8, 12, 18, 180), outline=(*accent, 160))
+
+    draw.text((left_x + 2, label_y), label_text, fill=(175, 195, 215, 235), font=label_font)
+    draw.text((left_x + 2, price_y), price_text, fill=(*accent, 255), font=price_font)
 
 
 def render_seismic_frame(
@@ -696,6 +735,7 @@ def render_seismic_frame(
     token_x: str,
     token_y: str,
     pool_address: str,
+    price_for_bin: dict[int, float] | None = None,
     width: int = 1400,
     height: int = 800,
     style: SeismicStyle = SeismicStyle(),
@@ -799,6 +839,22 @@ def render_seismic_frame(
     )
     draw.text((left, 13), title, fill=style.hud, font=title_font)
     draw.text((left, 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
+
+    if price_for_bin:
+        spot_price = price_for_bin.get(int(current.active_bin_id))
+        prev_price = (
+            price_for_bin.get(int(traces[current_index - 1].active_bin_id))
+            if current_index > 0
+            else None
+        )
+        if spot_price is not None and spot_price > 0:
+            _draw_price_ticker(
+                draw,
+                spot_price=spot_price,
+                prev_price=prev_price,
+                token_x=token_x,
+                token_y=token_y,
+            )
 
     legend_font = channel_font
     legend_line = int(CHANNEL_FONT_SIZE * 1.3)
