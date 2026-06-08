@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw
 
 from meteora_bin_atlas.explore.labels import bar_color_for_bin
 
-# Current skyline uses this fraction of plot height; ghosts share the same baseline.
-CURRENT_DEFLECTION_RATIO = 0.36
+# Skyline rises from the plot floor; this fraction caps peak height below the top margin.
+CURRENT_DEFLECTION_RATIO = 0.86
 GHOST_HISTORY = 7
 CURRENT_FILL_ALPHA = 88
 CURRENT_OUTLINE_ALPHA = 130
@@ -299,7 +299,7 @@ def render_seismic_frame(
     draw = ImageDraw.Draw(img, "RGBA")
     _draw_grid(draw, zoom_bins=zoom_bins, plot_box=plot_box, style=style)
 
-    trace_y = (top + bottom) / 2
+    trace_y = float(bottom)
     max_deflection = (bottom - top) * CURRENT_DEFLECTION_RATIO
     first_layer = max(0, current_index - GHOST_HISTORY)
 
@@ -335,7 +335,7 @@ def render_seismic_frame(
     ghost_count = current_index - first_layer
     if ghost_count > 0:
         draw.text(
-            (left - 88, trace_y - 8),
+            (left - 88, top + 10),
             f"{ghost_count} fading trace{'s' if ghost_count != 1 else ''}",
             fill=(*style.hud[:3], 140),
         )
