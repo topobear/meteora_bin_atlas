@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots render-mp4 atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots simulate-series render-mp4 render-mp4-demo atlas notebook
 
 # Default pool: SOL-USDC from data/manual_pools.json
 POOL ?= 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
@@ -75,9 +75,11 @@ help:
 	@echo "  make fetch-series       bounded snapshot series only"
 	@echo "  make normalize-series   normalize latest series manifest only"
 	@echo "  make render-mp4         MP4 from latest bin_atlas_series CSV (needs ffmpeg)"
+	@echo "  make simulate-series    synthetic series from real seed (no RPC; for long MP4s)"
+	@echo "  make render-mp4-demo    simulate-series + render-mp4 (~60s default)"
 	@echo ""
 	@echo "Poll knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
-	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4),"
+	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4), SIM_COUNT, SIM_INTERVAL_SEC,"
 	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC, SERIES_BINS_LEFT/RIGHT"
 	@echo ""
 	@echo "Notebook"
@@ -135,13 +137,27 @@ fetch-series:
 normalize-series:
 	npm run normalize:series -- $(POOL_ARGS)
 
-# Render latest bin_atlas_series CSV → plots/temporal_<pool>_<ts>.mp4 (requires ffmpeg)
+# --- MP4 render (make render-mp4) -------------------------------------------
+
+# Seconds each snapshot stays on screen × fps = frames per snapshot.
+# 60 snapshots × 1.0s × 10 fps → ~60s MP4 (use simulate-series first).
 FRAME_DURATION ?= 1.0
 MP4_FPS ?= 10
 RENDER_ARGS = --frame-duration $(FRAME_DURATION) --fps $(MP4_FPS)
 
+# Simulated series from the latest real seed (no RPC). Default 60 snaps ≈ 60s MP4.
+SIM_COUNT ?= 60
+SIM_INTERVAL_SEC ?= 10
+SIM_SEED ?=
+SIM_ARGS = --count $(SIM_COUNT) --interval-sec $(SIM_INTERVAL_SEC) $(if $(SIM_SEED),--seed $(SIM_SEED),)
+
+simulate-series:
+	poetry run python -m meteora_bin_atlas.temporal.simulate --pool $(POOL) $(SIM_ARGS)
+
 render-mp4:
 	poetry run python -m meteora_bin_atlas.temporal.render --pool $(POOL) $(RENDER_ARGS)
+
+render-mp4-demo: simulate-series render-mp4
 
 # --- Notebook ---------------------------------------------------------------
 

@@ -14,9 +14,18 @@ from meteora_bin_atlas.explore.labels import bar_color_for_bin
 
 # Skyline rises from the plot floor; this fraction caps peak height below the top margin.
 CURRENT_DEFLECTION_RATIO = 0.86
-GHOST_HISTORY = 7
-CURRENT_FILL_ALPHA = 88
-CURRENT_OUTLINE_ALPHA = 130
+GHOST_HISTORY = 4
+ROLLING_SNAPSHOTS = 5
+DISPLAY_PAD_BINS = 4
+ZOOM_IN_RATIO = 0.72
+MIN_DISPLAY_BINS = 25
+CURRENT_FILL_ALPHA = 95
+CURRENT_OUTLINE_ALPHA = 145
+GHOST_FILL_BASE = 50
+GHOST_FILL_DECAY = 0.24
+GHOST_OUTLINE_BASE = 62
+GHOST_OUTLINE_DECAY = 0.34
+GHOST_FILL_CUTOFF_AGE = 2
 
 # Muted token palette for the blackboard (keeps notebook TOKEN_COLORS unchanged).
 SEISMIC_TOKEN_COLORS = {
@@ -39,7 +48,7 @@ class SeismicStyle:
 
 @dataclass(frozen=True)
 class GlobalFrame:
-    """Fixed bin-id axis spanning the union of all snapshots in a series."""
+    """Visible bin-id viewport (dynamic rolling window or full atlas extent)."""
 
     bin_id_min: int
     bin_id_max: int
@@ -145,6 +154,78 @@ def prepare_snapshot_traces(
     return traces, scale, frame
 
 
+def _observed_extent(trace: SnapshotTrace) -> tuple[int, int]:
+    """Bin-id span with liquidity plus the snapshot's active bin."""
+    has_liquidity = trace.liquidity > 0
+    lo = int(trace.active_bin_id)
+    hi = int(trace.active_bin_id)
+    if has_liquidity.any():
+        observed = trace.bin_ids[has_liquidity]
+        lo = min(lo, int(observed.min()))
+        hi = max(hi, int(observed.max()))
+    return lo, hi
+
+
+def _padded_bounds(lo: int, hi: int) -> tuple[int, int]:
+    padded_lo = lo - DISPLAY_PAD_BINS
+    padded_hi = hi + DISPLAY_PAD_BINS
+    span = padded_hi - padded_lo + 1
+    if span >= MIN_DISPLAY_BINS:
+        return padded_lo, padded_hi
+    center = (padded_lo + padded_hi) // 2
+    half = MIN_DISPLAY_BINS // 2
+    return center - half, center + half
+
+
+def _rolling_content_bounds(traces: list[SnapshotTrace], current_index: int) -> tuple[int, int]:
+    """Union of observed bin spans across the recent snapshot window."""
+    start = max(0, current_index - ROLLING_SNAPSHOTS + 1)
+    lo = int(traces[start].active_bin_id)
+    hi = lo
+    for trace in traces[start : current_index + 1]:
+        trace_lo, trace_hi = _observed_extent(trace)
+        lo = min(lo, trace_lo)
+        hi = max(hi, trace_hi)
+    return _padded_bounds(lo, hi)
+
+
+def _clamp_to_atlas(lo: int, hi: int, atlas: GlobalFrame | None) -> tuple[int, int]:
+    if atlas is None:
+        return lo, hi
+    return max(atlas.bin_id_min, lo), min(atlas.bin_id_max, hi)
+
+
+def compute_display_frame(
+    traces: list[SnapshotTrace],
+    current_index: int,
+    previous: GlobalFrame | None,
+    *,
+    atlas: GlobalFrame | None = None,
+) -> GlobalFrame:
+    """
+    Update the visible bin-id viewport.
+
+    Zooms out when the rolling window escapes the current frame; zooms in when
+    the rolling window is much narrower than what is currently shown.
+    """
+    content_lo, content_hi = _rolling_content_bounds(traces, current_index)
+    content_lo, content_hi = _clamp_to_atlas(content_lo, content_hi, atlas)
+
+    if previous is None:
+        return GlobalFrame(bin_id_min=content_lo, bin_id_max=content_hi)
+
+    display_lo = min(previous.bin_id_min, content_lo)
+    display_hi = max(previous.bin_id_max, content_hi)
+
+    content_span = content_hi - content_lo + 1
+    display_span = display_hi - display_lo + 1
+    if content_span < ZOOM_IN_RATIO * display_span:
+        display_lo, display_hi = content_lo, content_hi
+
+    display_lo, display_hi = _clamp_to_atlas(display_lo, display_hi, atlas)
+    return GlobalFrame(bin_id_min=display_lo, bin_id_max=display_hi)
+
+
 def _plot_background(plot_width: int, plot_height: int) -> np.ndarray:
     y, x = np.ogrid[:plot_height, :plot_width]
     cx = plot_width / 2
@@ -186,7 +267,7 @@ def _x_edge_for_bin_id(
 def _muted_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
     rgb = _hex_to_rgb(hex_color)
     bg = SeismicStyle.background
-    mute = 0.38 + 0.62 * (0.72 ** layer_age)
+    mute = 0.12 + 0.88 * (0.45 ** layer_age)
     return tuple(int(bg[i] + (rgb[i] - bg[i]) * mute) for i in range(3))
 
 
@@ -194,8 +275,10 @@ def _ghost_alphas(layer_age: int) -> tuple[int, int]:
     """Steady-state alpha for a layer `layer_age` snapshots behind the current one."""
     if layer_age <= 0:
         return CURRENT_FILL_ALPHA, CURRENT_OUTLINE_ALPHA
-    fill = max(10, int(62 * (0.60 ** layer_age)))
-    outline = max(14, int(78 * (0.64 ** layer_age)))
+    fill = max(0, int(GHOST_FILL_BASE * (GHOST_FILL_DECAY**layer_age)))
+    if layer_age >= GHOST_FILL_CUTOFF_AGE:
+        fill = 0
+    outline = max(4, int(GHOST_OUTLINE_BASE * (GHOST_OUTLINE_DECAY**layer_age)))
     return fill, outline
 
 
@@ -283,6 +366,9 @@ def _draw_horizontal_wiggle_trace(
         strict=True,
     ):
         bin_id = int(bin_id)
+        if bin_id < frame.bin_id_min or bin_id > frame.bin_id_max:
+            continue
+
         x_center = _x_center_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w)
         offset = (float(liquidity) / liquidity_scale) * max_deflection
         peak_y = trace_y - offset

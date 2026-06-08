@@ -12,6 +12,8 @@ from meteora_bin_atlas.explore.labels import parse_token_labels
 from meteora_bin_atlas.paths import DATA_PROCESSED, PLOTS_DIR
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series
 from meteora_bin_atlas.temporal.seismic import (
+    GlobalFrame,
+    compute_display_frame,
     encode_mp4,
     prepare_snapshot_traces,
     render_seismic_frame,
@@ -59,7 +61,7 @@ def build_temporal_mp4(
         raise ValueError(f"No rows found in {series_source}")
 
     token_x, token_y = resolve_token_labels(pool_address, processed_dir)
-    traces, liquidity_scale, global_frame = prepare_snapshot_traces(
+    traces, liquidity_scale, atlas_frame = prepare_snapshot_traces(
         series_df,
         zoom_bins=zoom_bins,
     )
@@ -73,7 +75,14 @@ def build_temporal_mp4(
     frame_arrays: list = []
 
     fade_fraction = 0.45
+    display_frame: GlobalFrame | None = None
     for current_index in range(len(traces)):
+        display_frame = compute_display_frame(
+            traces,
+            current_index,
+            display_frame,
+            atlas=atlas_frame,
+        )
         fade_frames = max(1, int(round(frames_per_snapshot * fade_fraction)))
         for frame_i in range(frames_per_snapshot):
             if current_index == 0:
@@ -82,7 +91,7 @@ def build_temporal_mp4(
                 blend = min(1.0, (frame_i + 1) / fade_frames)
             rgb = render_seismic_frame(
                 traces,
-                frame=global_frame,
+                frame=display_frame,
                 current_index=current_index,
                 transition_blend=blend,
                 zoom_bins=zoom_bins,
