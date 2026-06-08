@@ -124,6 +124,7 @@ def run_temporal(
             processed_dir=project_root / "data" / "processed",
         )
     else:
+        rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
         _fetch_live_series(
             pool_address=pool_address,
             dataset=dataset,
