@@ -211,6 +211,41 @@ def _clamp_to_atlas(lo: int, hi: int, atlas: GlobalFrame | None) -> tuple[int, i
     return max(atlas.bin_id_min, lo), min(atlas.bin_id_max, hi)
 
 
+def _center_frame_on_active(
+    display_lo: int,
+    display_hi: int,
+    *,
+    active_bin_id: int,
+    content_lo: int,
+    content_hi: int,
+    atlas: GlobalFrame | None,
+) -> tuple[int, int]:
+    """Keep the active-bin marker near plot center while content remains visible."""
+    span = display_hi - display_lo + 1
+    half = span // 2
+    centered_lo = active_bin_id - half
+    centered_hi = centered_lo + span - 1
+
+    if content_lo < centered_lo:
+        shift = content_lo - centered_lo
+        centered_lo += shift
+        centered_hi += shift
+    if content_hi > centered_hi:
+        shift = content_hi - centered_hi
+        centered_lo += shift
+        centered_hi += shift
+
+    centered_lo, centered_hi = _clamp_to_atlas(centered_lo, centered_hi, atlas)
+    if active_bin_id < centered_lo:
+        centered_hi += centered_lo - active_bin_id
+        centered_lo = active_bin_id
+    elif active_bin_id > centered_hi:
+        centered_lo -= active_bin_id - centered_hi
+        centered_hi = active_bin_id
+
+    return _clamp_to_atlas(centered_lo, centered_hi, atlas)
+
+
 def compute_display_frame(
     traces: list[SnapshotTrace],
     current_index: int,
@@ -222,23 +257,32 @@ def compute_display_frame(
     Update the visible bin-id viewport.
 
     Zooms out when the rolling window escapes the current frame; zooms in when
-    the rolling window is much narrower than what is currently shown.
+    the rolling window is much narrower than what is currently shown. Recenters
+    on the active bin so the marker stays in the middle of the plot.
     """
     content_lo, content_hi = _rolling_content_bounds(traces, current_index)
     content_lo, content_hi = _clamp_to_atlas(content_lo, content_hi, atlas)
+    active_bin_id = int(traces[current_index].active_bin_id)
 
     if previous is None:
-        return GlobalFrame(bin_id_min=content_lo, bin_id_max=content_hi)
-
-    display_lo = min(previous.bin_id_min, content_lo)
-    display_hi = max(previous.bin_id_max, content_hi)
-
-    content_span = content_hi - content_lo + 1
-    display_span = display_hi - display_lo + 1
-    if content_span < ZOOM_IN_RATIO * display_span:
         display_lo, display_hi = content_lo, content_hi
+    else:
+        display_lo = min(previous.bin_id_min, content_lo)
+        display_hi = max(previous.bin_id_max, content_hi)
 
-    display_lo, display_hi = _clamp_to_atlas(display_lo, display_hi, atlas)
+        content_span = content_hi - content_lo + 1
+        display_span = display_hi - display_lo + 1
+        if content_span < ZOOM_IN_RATIO * display_span:
+            display_lo, display_hi = content_lo, content_hi
+
+    display_lo, display_hi = _center_frame_on_active(
+        display_lo,
+        display_hi,
+        active_bin_id=active_bin_id,
+        content_lo=content_lo,
+        content_hi=content_hi,
+        atlas=atlas,
+    )
     return GlobalFrame(bin_id_min=display_lo, bin_id_max=display_hi)
 
 
@@ -363,11 +407,13 @@ def _draw_active_bin_marker(
 ) -> float:
     left, top, right, bottom = plot_box
     cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
-    active_x = _x_center_for_bin_id(active_bin_id, frame=frame, plot_left=left, cell_w=cell_w)
-    draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=1)
+    active_x = round(
+        _x_center_for_bin_id(active_bin_id, frame=frame, plot_left=left, cell_w=cell_w)
+    )
+    draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=2)
     tick = 6
-    draw.line([(active_x - tick, top), (active_x + tick, top)], fill=style.active_bin, width=1)
-    draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=style.active_bin, width=1)
+    draw.line([(active_x - tick, top), (active_x + tick, top)], fill=style.active_bin, width=2)
+    draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=style.active_bin, width=2)
     draw.text(
         (active_x + 6, top + 4),
         f"ACTIVE {active_bin_id}",
@@ -481,7 +527,7 @@ def render_seismic_frame(
     height: int = 800,
     style: SeismicStyle = SeismicStyle(),
 ) -> np.ndarray:
-    """Render the blackboard in a fixed global bin-id frame; active bin marker slides."""
+    """Render the blackboard with a viewport recentered on the active bin marker."""
     _ = zoom_bins
     current_index = max(0, min(current_index, len(traces) - 1))
     total_traces = len(traces)
