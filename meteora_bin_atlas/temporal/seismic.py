@@ -11,8 +11,6 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-from meteora_bin_atlas.explore.labels import bar_color_for_bin
-
 # Skyline rises from the plot floor; this fraction caps peak height below the top margin.
 CURRENT_DEFLECTION_RATIO = 0.86
 GHOST_HISTORY = 8
@@ -60,6 +58,11 @@ SEISMIC_TOKEN_COLORS = {
     "mix": "#E8F4FF",
     "empty": "#000000",
 }
+# Active bin is always painted orange so it stays legible regardless of its token
+# mix. Every other bin is coloured by its actual proportional composition: a
+# continuous blend from cyan (all Y / USDC) through purple (balanced) to magenta
+# (all X / SOL). See _composition_rgb.
+SEISMIC_ACTIVE_COLOR = "#FF8A00"
 
 _TRACE_OUTLINE_BASE = (232, 244, 255)
 TITLE_FONT_SIZE = 26
@@ -354,15 +357,37 @@ def _x_edge_for_bin_id(
     return plot_left + index * cell_w
 
 
-def _layer_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
-    rgb = _hex_to_rgb(hex_color)
+def _dim_rgb(rgb: tuple[int, int, int], *, layer_age: int) -> tuple[int, int, int]:
+    """Fade an RGB toward the background for ghost layers (age > 0)."""
     if layer_age <= 0:
         return rgb
     bg = SeismicStyle.background
     # Aggressive hue dimming: a bar drops toward grey/black within a frame or two
-    # so afterimages read as faint ghosts, not solid white columns.
+    # so afterimages read as faint ghosts, not solid columns.
     mute = 0.5**layer_age
     return tuple(int(bg[i] + (rgb[i] - bg[i]) * mute) for i in range(3))
+
+
+def _layer_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
+    return _dim_rgb(_hex_to_rgb(hex_color), layer_age=layer_age)
+
+
+def _composition_rgb(x_amount: float, y_amount: float) -> tuple[int, int, int]:
+    """Colour a bin by its actual token mix: cyan (Y) → purple → magenta (X).
+
+    The blend fraction is the bin's share of token X, so a bin holding only Y
+    (USDC) is cyan, only X (SOL) is magenta, and a balanced bin sits at the
+    purple midpoint — a continuous read of inventory composition.
+    """
+    x = max(0.0, x_amount)
+    y = max(0.0, y_amount)
+    total = x + y
+    if total <= 0:
+        return _hex_to_rgb(SEISMIC_TOKEN_COLORS["empty"])
+    share_x = x / total
+    y_rgb = _hex_to_rgb(SEISMIC_TOKEN_COLORS["Y"])
+    x_rgb = _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"])
+    return tuple(int(round(y_rgb[i] + (x_rgb[i] - y_rgb[i]) * share_x)) for i in range(3))
 
 
 def _trace_outline_rgb(layer_age: int) -> tuple[int, int, int]:
@@ -475,12 +500,14 @@ def _draw_active_bin_marker(
     )
     half = max(4.0, cell_w / 2.0)
     pole_top = label_y if label_y is not None else top
+    # White pole/flag marks the active bin; the bars already carry proportional
+    # composition colour, so white is a free, unambiguous locator.
     draw.rectangle([active_x - half, pole_top, active_x + half, bottom], fill=(255, 255, 255, 80))
     draw.line([(active_x, pole_top), (active_x, bottom)], fill=(0, 0, 0, 150), width=5)
-    draw.line([(active_x, pole_top), (active_x, bottom)], fill=style.active_bin, width=3)
+    draw.line([(active_x, pole_top), (active_x, bottom)], fill=(255, 255, 255, 255), width=3)
     tick = 8
-    draw.line([(active_x - tick, pole_top), (active_x + tick, pole_top)], fill=style.active_bin, width=3)
-    draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=style.active_bin, width=3)
+    draw.line([(active_x - tick, pole_top), (active_x + tick, pole_top)], fill=(255, 255, 255, 255), width=3)
+    draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=(255, 255, 255, 255), width=3)
     label = f"ACTIVE {active_bin_id}"
     tx = active_x + 6
     ty = label_y if label_y is not None else top + 4
@@ -489,9 +516,9 @@ def _draw_active_bin_marker(
     draw.rectangle(
         [tx + bbox[0] - pad_x, ty + bbox[1] - pad_y,
          tx + bbox[2] + pad_x, ty + bbox[3] + pad_y],
-        fill=(200, 90, 0, 230),
+        fill=(245, 247, 250, 235),
     )
-    draw.text((tx, ty), label, fill=(255, 255, 255, 255), font=font)
+    draw.text((tx, ty), label, fill=(20, 22, 28, 255), font=font)
     return active_x
 
 
@@ -539,17 +566,12 @@ def _draw_horizontal_wiggle_trace(
 
         distance = bin_id - trace.active_bin_id
         if distance == 0:
-            # The active bin is the price/handoff bin; always paint it as the
-            # mix (white) column so it reads as the active marker every frame.
-            color_hex = SEISMIC_TOKEN_COLORS["mix"]
+            # The active (price/handoff) bin is always orange so it stays the
+            # unambiguous marker every frame, whatever its token mix.
+            base_rgb = _hex_to_rgb(SEISMIC_ACTIVE_COLOR)
         else:
-            color_hex = bar_color_for_bin(
-                float(x_amount),
-                float(y_amount),
-                distance,
-                colors=SEISMIC_TOKEN_COLORS,
-            )
-        rgb = _layer_rgb(color_hex, layer_age=layer_age)
+            base_rgb = _composition_rgb(float(x_amount), float(y_amount))
+        rgb = _dim_rgb(base_rgb, layer_age=layer_age)
 
         x_left = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w) + x_drift
         x_right = x_left + cell_w
@@ -872,8 +894,14 @@ def render_seismic_frame(
     )
     draw.text(
         (legend_x, legend_y + 2 * legend_line),
-        f"| {token_x}+{token_y}",
-        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["mix"], layer_age=0), 240),
+        f"| {token_x}+{token_y} (mix)",
+        fill=(*_composition_rgb(1.0, 1.0), 240),
+        font=legend_font,
+    )
+    draw.text(
+        (legend_x, legend_y + 3 * legend_line),
+        "| ACTIVE",
+        fill=(*_hex_to_rgb(SEISMIC_ACTIVE_COLOR), 255),
         font=legend_font,
     )
 
