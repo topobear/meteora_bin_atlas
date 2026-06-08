@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -21,6 +20,9 @@ ROLLING_SNAPSHOTS = 5
 DISPLAY_PAD_BINS = 4
 ZOOM_IN_RATIO = 0.72
 MIN_DISPLAY_BINS = 25
+# Active bin must stay at least this many bins away from the viewport edge
+# before the window scrolls.  Gives a natural left/right float within the plot.
+VIEWPORT_EDGE_BAND = 10
 CURRENT_FILL_ALPHA = 28
 CURRENT_OUTLINE_ALPHA = 220
 GHOST_FILL_BASE = 18
@@ -218,83 +220,6 @@ def _clamp_to_atlas(lo: int, hi: int, atlas: GlobalFrame | None) -> tuple[int, i
     return max(atlas.bin_id_min, lo), min(atlas.bin_id_max, hi)
 
 
-def _desired_display_span(
-    traces: list[SnapshotTrace],
-    current_index: int,
-    previous: GlobalFrame | None,
-    *,
-    content_lo: int,
-    content_hi: int,
-) -> int:
-    """Viewport width: grow only when centered window no longer fits content."""
-    content_span = content_hi - content_lo + 1
-    if previous is None:
-        return max(content_span, MIN_DISPLAY_BINS)
-
-    prev_span = previous.n_bins
-    if content_span < ZOOM_IN_RATIO * prev_span:
-        return max(content_span, MIN_DISPLAY_BINS)
-
-    active_bin_id = int(traces[current_index].active_bin_id)
-    half = (prev_span - 1) // 2
-    centered_lo = active_bin_id - half
-    centered_hi = centered_lo + prev_span - 1
-    if content_lo >= centered_lo and content_hi <= centered_hi:
-        return prev_span
-
-    return max(prev_span, content_span, MIN_DISPLAY_BINS)
-
-
-def _frame_centered_on_active(
-    span: int,
-    *,
-    active_bin_id: int,
-    content_lo: int,
-    content_hi: int,
-    atlas: GlobalFrame | None,
-) -> tuple[int, int]:
-    """Pick integer bin bounds that pixel-center the active bin when possible."""
-    min_span = max(content_hi - content_lo + 1, MIN_DISPLAY_BINS)
-    max_span = span
-    if atlas is not None:
-        max_span = min(max_span, atlas.bin_id_max - atlas.bin_id_min + 1)
-
-    best_lo = content_lo
-    best_hi = content_hi
-    best_err = float("inf")
-    best_span = max_span
-
-    for try_span in range(min_span, max_span + 1):
-        ideal_lo = active_bin_id + 0.5 - try_span / 2
-        for lo in {int(math.floor(ideal_lo)), int(math.ceil(ideal_lo))}:
-            hi = lo + try_span - 1
-            if lo > content_lo or hi < content_hi:
-                continue
-            if atlas is not None and (lo < atlas.bin_id_min or hi > atlas.bin_id_max):
-                continue
-            err = abs((active_bin_id - lo) + 0.5 - try_span / 2)
-            if err < best_err or (math.isclose(err, best_err) and try_span < best_span):
-                best_err = err
-                best_lo = lo
-                best_hi = hi
-                best_span = try_span
-
-    if math.isfinite(best_err):
-        return best_lo, best_hi
-
-    lo = active_bin_id - (max_span - 1) // 2
-    hi = lo + max_span - 1
-    if content_lo < lo:
-        shift = content_lo - lo
-        lo += shift
-        hi += shift
-    if content_hi > hi:
-        shift = content_hi - hi
-        lo += shift
-        hi += shift
-    return _clamp_to_atlas(lo, hi, atlas)
-
-
 def compute_display_frame(
     traces: list[SnapshotTrace],
     current_index: int,
@@ -303,32 +228,70 @@ def compute_display_frame(
     atlas: GlobalFrame | None = None,
 ) -> GlobalFrame:
     """
-    Update the visible bin-id viewport.
+    Sliding-window viewport with a dead-band.
 
-    Zooms out when the rolling window escapes the current frame; zooms in when
-    the rolling window is much narrower than what is currently shown. Keeps the
-    active bin on the plot center instead of monotonically expanding to atlas width.
+    The active bin floats freely within the plot; the window only scrolls when
+    the active bin drifts within VIEWPORT_EDGE_BAND bins of either edge.  The
+    span grows to accommodate content and shrinks (with hysteresis) when content
+    is much narrower than the current window.
     """
-    padded_lo, padded_hi = _rolling_content_bounds(traces, current_index)
-    padded_lo, padded_hi = _clamp_to_atlas(padded_lo, padded_hi, atlas)
     observed_lo, observed_hi = _rolling_observed_bounds(traces, current_index)
     observed_lo, observed_hi = _clamp_to_atlas(observed_lo, observed_hi, atlas)
-    active_bin_id = int(traces[current_index].active_bin_id)
-    span = _desired_display_span(
-        traces,
-        current_index,
-        previous,
-        content_lo=padded_lo,
-        content_hi=padded_hi,
+    active = int(traces[current_index].active_bin_id)
+
+    # Required span: content + padding on each side, at least MIN_DISPLAY_BINS.
+    content_span = max(
+        observed_hi - observed_lo + 1 + 2 * DISPLAY_PAD_BINS,
+        MIN_DISPLAY_BINS,
     )
-    display_lo, display_hi = _frame_centered_on_active(
-        span,
-        active_bin_id=active_bin_id,
-        content_lo=observed_lo,
-        content_hi=observed_hi,
-        atlas=atlas,
-    )
-    return GlobalFrame(bin_id_min=display_lo, bin_id_max=display_hi)
+
+    if previous is None:
+        # First frame: center on the active bin.
+        span = content_span
+        lo = active - span // 2
+        hi = lo + span - 1
+        return GlobalFrame(*_clamp_to_atlas(lo, hi, atlas))
+
+    prev_span = previous.n_bins
+
+    # Decide new span: only grow, or shrink if content is much narrower.
+    if content_span < ZOOM_IN_RATIO * prev_span:
+        span = content_span
+    else:
+        span = max(prev_span, content_span)
+
+    # Inherit the previous window position, resizing around its centre if needed.
+    lo = previous.bin_id_min
+    hi = previous.bin_id_max
+    if span != prev_span:
+        mid = (lo + hi) // 2
+        lo = mid - span // 2
+        hi = lo + span - 1
+
+    # Scroll minimally so the active bin stays inside the middle ±30% of the
+    # viewport. The dead-band width is 40% of the span (20% on each side of
+    # center); scrolling only kicks in when the bar drifts past the outer 30%.
+    margin = max(VIEWPORT_EDGE_BAND, round(0.30 * span))
+    if active - lo < margin:
+        shift = margin - (active - lo)
+        lo -= shift
+        hi -= shift
+    elif hi - active < margin:
+        shift = margin - (hi - active)
+        lo += shift
+        hi += shift
+
+    # Safety: make sure observed content is still inside the window.
+    if observed_lo < lo:
+        delta = lo - observed_lo
+        lo -= delta
+        hi -= delta
+    if observed_hi > hi:
+        delta = observed_hi - hi
+        lo += delta
+        hi += delta
+
+    return GlobalFrame(*_clamp_to_atlas(lo, hi, atlas))
 
 
 @lru_cache(maxsize=8)
@@ -433,10 +396,28 @@ def _draw_grid(
     left, top, right, bottom = plot_box
     cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
 
-    for offset in range(0, frame.n_bins, 10):
-        bin_id = frame.bin_id_min + offset
-        x = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=left, cell_w=cell_w)
-        draw.line([(x, top), (x, bottom)], fill=style.grid_major, width=1)
+    # Adaptive grid step: target ~15 gridlines across the plot.
+    # Snap to a "nice" interval (2, 5, 10, 20 …) so lines always land on round bin ids.
+    raw_step = max(1, frame.n_bins // 15)
+    for nice in (2, 5, 10, 20, 50, 100):
+        if nice >= raw_step:
+            grid_step = nice
+            break
+    else:
+        grid_step = raw_step
+
+    # Align first line to a multiple of grid_step so labels feel anchored.
+    first = (
+        (frame.bin_id_min // grid_step) * grid_step
+        if frame.bin_id_min >= 0
+        else -((-frame.bin_id_min + grid_step - 1) // grid_step) * grid_step
+    )
+    bin_id = first
+    while bin_id <= frame.bin_id_max:
+        if bin_id >= frame.bin_id_min:
+            x = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=left, cell_w=cell_w)
+            draw.line([(x, top), (x, bottom)], fill=style.grid_major, width=1)
+        bin_id += grid_step
 
     draw.line([(left, trace_y), (right, trace_y)], fill=style.baseline, width=1)
 
