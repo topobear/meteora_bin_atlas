@@ -519,12 +519,17 @@ def _draw_horizontal_wiggle_trace(
             continue
 
         distance = bin_id - trace.active_bin_id
-        color_hex = bar_color_for_bin(
-            float(x_amount),
-            float(y_amount),
-            distance,
-            colors=SEISMIC_TOKEN_COLORS,
-        )
+        if distance == 0:
+            # The active bin is the price/handoff bin; always paint it as the
+            # mix (white) column so it reads as the active marker every frame.
+            color_hex = SEISMIC_TOKEN_COLORS["mix"]
+        else:
+            color_hex = bar_color_for_bin(
+                float(x_amount),
+                float(y_amount),
+                distance,
+                colors=SEISMIC_TOKEN_COLORS,
+            )
         rgb = _layer_rgb(color_hex, layer_age=layer_age)
 
         x_left = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w) + x_drift
