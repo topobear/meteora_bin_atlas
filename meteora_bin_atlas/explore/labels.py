@@ -35,15 +35,22 @@ def bar_color_for_bin(
     y_amount: float,
     distance_from_active: int | None = None,
     colors: dict[str, str] | None = None,
+    *,
+    mix_min_share: float = 0.05,
 ) -> str:
+    """Return bar color from stocked amounts (one token unless both are material)."""
+    _ = distance_from_active
     palette = colors or TOKEN_COLORS
-    if distance_from_active == 0:
-        return palette["mix"]
-    if x_amount > 0 and y_amount > 0:
-        return palette["mix"]
-    if y_amount > 0:
+    x = max(0.0, float(x_amount))
+    y = max(0.0, float(y_amount))
+    if x > 0 and y > 0:
+        total = x + y
+        if total > 0 and min(x, y) / total >= mix_min_share:
+            return palette["mix"]
+        return palette["X"] if x >= y else palette["Y"]
+    if y > 0:
         return palette["Y"]
-    if x_amount > 0:
+    if x > 0:
         return palette["X"]
     return palette["empty"]
 

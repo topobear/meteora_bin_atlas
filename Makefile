@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal temporal-simulated timelapse timelapse-simulated simulate-series render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated temporal temporal-simulated timelapse timelapse-simulated simulate-series render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
 ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
@@ -75,6 +75,9 @@ help:
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
 	@echo "Temporal (default pool: SOL-USDC)"
+	@echo "  make fetch-data         same fetch as temporal, no MP4 (240 snaps @ 1.5Hz)"
+	@echo "                          DATASET=simulated → data/simulated (~seconds)"
+	@echo "  make fetch-data-simulated alias for fetch-data DATASET=simulated"
 	@echo "  make temporal           240 snaps @ 1.5Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
 	@echo "                          DATASET=simulated → no RPC (~seconds)"
 	@echo "  make temporal-simulated alias for temporal DATASET=simulated"
@@ -160,8 +163,17 @@ TEMPORAL_OUTPUT_ARGS = $(if $(TEMPORAL_OUTPUT),--output $(TEMPORAL_OUTPUT),)
 TEMPORAL_ARGS = --pool $(POOL) --dataset $(DATASET) \
 	--duration-sec $(TEMPORAL_DURATION_SEC) --fps $(TEMPORAL_FPS) --count $(TEMPORAL_COUNT) \
 	--poll-hz $(TEMPORAL_POLL_HZ) $(TEMPORAL_OUTPUT_ARGS)
+FETCH_DATA_ARGS = --pool $(POOL) --dataset $(DATASET) \
+	--count $(TEMPORAL_COUNT) --poll-hz $(TEMPORAL_POLL_HZ)
 
 # --- Snapshot polling pipeline ----------------------------------------------
+
+fetch-data:
+	poetry run python -m meteora_bin_atlas.temporal.fetch $(FETCH_DATA_ARGS) \
+		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+
+fetch-data-simulated:
+	$(MAKE) fetch-data DATASET=simulated
 
 temporal:
 	poetry run python -m meteora_bin_atlas.temporal.run $(TEMPORAL_ARGS) \

@@ -76,6 +76,57 @@ def _fetch_live_series(
         sys.exit(result.returncode)
 
 
+def fetch_temporal_data(
+    pool_address: str | None = None,
+    *,
+    dataset: str = DEFAULT_DATASET,
+    snapshot_count: int = DEFAULT_SNAPSHOT_COUNT,
+    poll_hz: float = DEFAULT_POLL_HZ,
+    bins_left: int = 30,
+    bins_right: int = 30,
+    project_root: Path | None = None,
+) -> Path | None:
+    """Fetch or simulate a snapshot series without rendering an MP4."""
+    load_dotenv()
+    pool_address = pool_address or get_pool_address()
+    project_root = project_root or _project_root()
+
+    interval_sec = poll_interval_sec(poll_hz)
+    poll_wall_sec = snapshot_count / poll_hz
+
+    print(
+        f"Fetch data: pool={pool_address} dataset={dataset}\n"
+        f"  {snapshot_count} snapshots @ {poll_hz:g} Hz "
+        f"(interval {interval_sec:.2f}s, ~{poll_wall_sec:.0f}s wall time)"
+    )
+    print("")
+
+    if dataset == "simulated":
+        print("Source: simulated")
+        _, series_csv = build_simulated_series(
+            pool_address,
+            snapshot_count=snapshot_count,
+            interval_sec=interval_sec,
+            seed_dir=project_root / "data" / "processed",
+            simulated_dir=project_root / "data" / "simulated",
+        )
+        return series_csv
+
+    rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
+    print(f"Source: {dataset} ({rpc_dataset.rpc_host})")
+    _fetch_live_series(
+        pool_address=pool_address,
+        dataset=dataset,
+        snapshot_count=snapshot_count,
+        rpc_backoff_sec=rpc_dataset.rpc_backoff_sec,
+        interval_sec=rpc_dataset.interval_sec,
+        bins_left=bins_left,
+        bins_right=bins_right,
+        project_root=project_root,
+    )
+    return None
+
+
 def run_temporal(
     pool_address: str | None = None,
     *,
@@ -90,8 +141,6 @@ def run_temporal(
     project_root: Path | None = None,
 ) -> Path:
     """Fetch or simulate a snapshot series and render a temporal MP4."""
-    load_dotenv()
-    pool_address = pool_address or get_pool_address()
     project_root = project_root or _project_root()
 
     expected = _expected_snapshot_count(duration_sec, fps)
@@ -101,41 +150,22 @@ def run_temporal(
             f"{snapshot_count / fps:.1f}s video (expected {expected} for {duration_sec:.0f}s)."
         )
 
-    interval_sec = poll_interval_sec(poll_hz)
-    poll_wall_sec = snapshot_count / poll_hz
-
     print(
-        f"Temporal run: pool={pool_address} dataset={dataset}\n"
-        f"  Poll: {snapshot_count} snapshots @ {poll_hz:g} Hz "
-        f"(interval {interval_sec:.2f}s, ~{poll_wall_sec:.0f}s wall time)\n"
+        f"Temporal run: pool={pool_address or get_pool_address()} dataset={dataset}\n"
         f"  Render: 1 snap = 1 frame → {duration_sec:.0f}s MP4 at {fps} fps "
         f"({snapshot_count} frames)"
     )
     print("")
 
-    series_csv: Path | None = None
-
-    if dataset == "simulated":
-        print("Source: simulated")
-        _, series_csv = build_simulated_series(
-            pool_address,
-            snapshot_count=snapshot_count,
-            interval_sec=interval_sec,
-            seed_dir=project_root / "data" / "processed",
-            simulated_dir=project_root / "data" / "simulated",
-        )
-    else:
-        rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
-        _fetch_live_series(
-            pool_address=pool_address,
-            dataset=dataset,
-            snapshot_count=snapshot_count,
-            rpc_backoff_sec=rpc_dataset.rpc_backoff_sec,
-            interval_sec=rpc_dataset.interval_sec,
-            bins_left=bins_left,
-            bins_right=bins_right,
-            project_root=project_root,
-        )
+    series_csv = fetch_temporal_data(
+        pool_address,
+        dataset=dataset,
+        snapshot_count=snapshot_count,
+        poll_hz=poll_hz,
+        bins_left=bins_left,
+        bins_right=bins_right,
+        project_root=project_root,
+    )
 
     return build_temporal_mp4(
         pool_address,
