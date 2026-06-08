@@ -61,10 +61,10 @@ SEISMIC_TOKEN_COLORS = {
 }
 
 _TRACE_OUTLINE_BASE = (232, 244, 255)
-TITLE_FONT_SIZE = 27
-SUBTITLE_FONT_SIZE = 21
-HUD_FONT_SIZE = 20
-CHANNEL_FONT_SIZE = 18
+TITLE_FONT_SIZE = 26
+SUBTITLE_FONT_SIZE = 20
+HUD_FONT_SIZE = 19
+CHANNEL_FONT_SIZE = 17
 _MONO_FONT_CANDIDATES = (
     "/System/Library/Fonts/Menlo.ttc",
     "/System/Library/Fonts/Supplemental/Courier New.ttf",
@@ -675,8 +675,8 @@ def _draw_drift_seismograph(
     draw.ellipse([nx - 4, ny - 4, nx + 4, ny + 4], fill=(255, 255, 255, 255))
 
     # Stronger, bold all-caps DRIFT header (double-struck for weight).
-    label_font = _load_mono_font(26)
-    label_xy = (DRIFT_STRIP_LEFT - 2, top - 32)
+    label_font = _load_mono_font(24)
+    label_xy = (DRIFT_STRIP_LEFT - 2, top - 24)
     for dx in (0, 1):
         draw.text((label_xy[0] + dx, label_xy[1]), "DRIFT", fill=(235, 246, 255, 255), font=label_font)
 
@@ -704,7 +704,7 @@ def render_seismic_frame(
     total_traces = len(traces)
 
     img = Image.new("RGBA", (width, height), style.background + (255,))
-    plot_box = (176, 100, width - 30, height - 100)
+    plot_box = (176, 82, width - 20, height - 76)
     left, top, right, bottom = plot_box
     plot_bg = Image.fromarray(_plot_background(right - left, bottom - top), mode="RGB")
     img.paste(plot_bg, (left, top))
@@ -776,11 +776,11 @@ def render_seismic_frame(
         font=hud_font,
     )
 
-    axis_y = height - 88
+    axis_y = height - 62
     draw.text((left, axis_y), str(frame.bin_id_min), fill=style.hud, font=hud_font)
-    draw.text((right - 96, axis_y), str(frame.bin_id_max), fill=style.hud, font=hud_font)
+    draw.text((right - 80, axis_y), str(frame.bin_id_max), fill=style.hud, font=hud_font)
     draw.text(
-        (left + (right - left) / 2 - 130, axis_y),
+        (left + (right - left) / 2 - 110, axis_y),
         "BIN ID · GLOBAL LATTICE",
         fill=style.hud,
         font=hud_font,
@@ -791,13 +791,13 @@ def render_seismic_frame(
         f"{token_x}/{token_y} | {pool_address[:6]}...{pool_address[-4:]} | "
         f"SNAP {current.snapshot_index + 1}/{total_traces} | {current.fetched_label}"
     )
-    draw.text((left, 22), title, fill=style.hud, font=title_font)
-    draw.text((left, 56), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
+    draw.text((left, 13), title, fill=style.hud, font=title_font)
+    draw.text((left, 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
 
-    legend_x = right - 280
-    legend_y = top + 8
+    legend_x = right - 230
+    legend_y = top + 6
     legend_font = channel_font
-    legend_line = int(CHANNEL_FONT_SIZE * 1.45)
+    legend_line = int(CHANNEL_FONT_SIZE * 1.3)
     draw.text(
         (legend_x, legend_y),
         f"| {token_y} (Y)",
