@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from meteora_bin_atlas.config import DEFAULT_POOL_ADDRESS, get_pool_address
@@ -18,6 +19,17 @@ from meteora_bin_atlas.temporal.seismic import (
     prepare_snapshot_traces,
     render_seismic_frame,
 )
+
+
+def subsample_trace_indices(n_snapshots: int, output_frames: int) -> list[int]:
+    """Pick evenly spaced snapshot indices for a fixed-length timelapse."""
+    if n_snapshots <= 0:
+        raise ValueError("n_snapshots must be positive")
+    if output_frames <= 0:
+        raise ValueError("output_frames must be positive")
+    if n_snapshots <= output_frames:
+        return list(range(n_snapshots))
+    return np.linspace(0, n_snapshots - 1, output_frames, dtype=int).tolist()
 
 
 def resolve_token_labels(pool_address: str, processed_dir: Path) -> tuple[str, str]:
@@ -43,6 +55,8 @@ def build_temporal_mp4(
     frame_duration_sec: float = 1.0,
     fps: int = 10,
     one_frame_per_snapshot: bool = False,
+    output_frames: int | None = None,
+    output_stem_prefix: str = "temporal",
     zoom_bins: int = 30,
     processed_dir: Path = DATA_PROCESSED,
     dpi: int = 150,
@@ -70,6 +84,10 @@ def build_temporal_mp4(
     if not traces:
         raise ValueError(f"No snapshots found in {series_source}")
 
+    trace_indices = list(range(len(traces)))
+    if one_frame_per_snapshot and output_frames is not None:
+        trace_indices = subsample_trace_indices(len(traces), output_frames)
+
     width = int(14 * dpi)
     height = int(8 * dpi)
     if one_frame_per_snapshot:
@@ -80,7 +98,7 @@ def build_temporal_mp4(
 
     fade_fraction = 0.0 if one_frame_per_snapshot else 0.45
     display_frame: GlobalFrame | None = None
-    for current_index in range(len(traces)):
+    for current_index in trace_indices:
         display_frame = compute_display_frame(
             traces,
             current_index,
@@ -110,7 +128,7 @@ def build_temporal_mp4(
 
     if output_path is None:
         PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-        stem = series_source.stem.replace("bin_atlas_series_", "temporal_")
+        stem = series_source.stem.replace("bin_atlas_series_", f"{output_stem_prefix}_")
         output_path = PLOTS_DIR / f"{stem}.mp4"
 
     output_path = output_path.resolve()
@@ -119,10 +137,16 @@ def build_temporal_mp4(
     duration_sec = len(frame_arrays) / fps
     print(f"Wrote {output_path}")
     if one_frame_per_snapshot:
-        print(
-            f"  {len(traces)} snapshots × 1 frame (1 snap = 1 frame) "
-            f"→ {len(frame_arrays)} frames, {fps} fps, {duration_sec:.1f}s total"
-        )
+        if output_frames is not None and len(traces) > output_frames:
+            print(
+                f"  {len(traces)} snapshots subsampled to {len(trace_indices)} frames "
+                f"→ {len(frame_arrays)} frames, {fps} fps, {duration_sec:.1f}s total"
+            )
+        else:
+            print(
+                f"  {len(traces)} snapshots × 1 frame (1 snap = 1 frame) "
+                f"→ {len(frame_arrays)} frames, {fps} fps, {duration_sec:.1f}s total"
+            )
     else:
         print(
             f"  {len(traces)} snapshots × {frames_per_snapshot} frames "

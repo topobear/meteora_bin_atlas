@@ -54,7 +54,7 @@ class SeismicStyle:
     grid_major: tuple[int, int, int, int] = (60, 80, 100, 35)
     baseline: tuple[int, int, int, int] = (80, 100, 120, 90)
     active_bin: tuple[int, int, int, int] = (232, 244, 255, 180)
-    hud: tuple[int, int, int, int] = (106, 122, 138, 220)
+    hud: tuple[int, int, int, int] = (190, 210, 230, 255)
     wiggle_outline: tuple[int, int, int, int] = (232, 244, 255, 220)
 
 
@@ -473,10 +473,10 @@ def render_seismic_frame(
     img.paste(plot_bg, (left, top))
 
     draw = ImageDraw.Draw(img, "RGBA")
-    title_font = _load_mono_font(14)
-    subtitle_font = _load_mono_font(11)
-    hud_font = _load_mono_font(10)
-    channel_font = _load_mono_font(9)
+    title_font = _load_mono_font(18)
+    subtitle_font = _load_mono_font(14)
+    hud_font = _load_mono_font(13)
+    channel_font = _load_mono_font(12)
 
     trace_y = float(bottom)
     _draw_grid(draw, frame=frame, plot_box=plot_box, trace_y=trace_y, style=style)
@@ -540,7 +540,7 @@ def render_seismic_frame(
         f"SNAP {current.snapshot_index + 1}/{total_traces} | {current.fetched_label}"
     )
     draw.text((left, 18), title, fill=style.hud, font=title_font)
-    draw.text((left, 40), subtitle, fill=(*style.hud[:3], 170), font=subtitle_font)
+    draw.text((left, 44), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
 
     legend_x = right - 220
     legend_y = top + 8
@@ -548,19 +548,19 @@ def render_seismic_frame(
     draw.text(
         (legend_x, legend_y),
         f"| {token_y} (Y)",
-        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["Y"], layer_age=0), 220),
+        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["Y"], layer_age=0), 240),
         font=legend_font,
     )
     draw.text(
-        (legend_x, legend_y + 16),
+        (legend_x, legend_y + 18),
         f"| {token_x} (X)",
-        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 220),
+        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 240),
         font=legend_font,
     )
     draw.text(
-        (legend_x, legend_y + 32),
+        (legend_x, legend_y + 36),
         f"| {token_x}+{token_y}",
-        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["mix"], layer_age=0), 220),
+        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["mix"], layer_age=0), 240),
         font=legend_font,
     )
 

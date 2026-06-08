@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal simulate-series render-mp4 render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal timelapse simulate-series render-mp4 render-mp4-demo atlas notebook
 
 # Default pool: SOL-USDC from data/manual_pools.json
 POOL ?= 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
@@ -71,6 +71,7 @@ help:
 	@echo ""
 	@echo "Temporal (default pool: SOL-USDC)"
 	@echo "  make temporal           240 snaps @ 1Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
+	@echo "  make timelapse          2400 snaps @ 1Hz → 10s MP4 @ 24fps (subsampled timelapse)"
 	@echo "  make poll-snapshots     OHLCV + snapshot series + series CSV only"
 	@echo "  make fetch-ohlcv        price candles only"
 	@echo "  make fetch-series       bounded snapshot series only"
@@ -81,6 +82,8 @@ help:
 	@echo ""
 	@echo "Temporal knobs: DATASET, TEMPORAL_COUNT (240), TEMPORAL_POLL_HZ (1),"
 	@echo "  TEMPORAL_FPS (24), TEMPORAL_DURATION_SEC (10), SERIES_BINS_LEFT/RIGHT"
+	@echo "Timelapse knobs: TIMELAPSE_COUNT (2400), TIMELAPSE_POLL_HZ (1),"
+	@echo "  TIMELAPSE_FPS (24), TIMELAPSE_DURATION_SEC (10)"
 	@echo "Poll knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
 	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4), SIM_COUNT, SIM_INTERVAL_SEC,"
 	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC"
@@ -138,6 +141,19 @@ TEMPORAL_ARGS = --pool $(POOL) --dataset $(DATASET) \
 
 temporal:
 	poetry run python -m meteora_bin_atlas.temporal.run $(TEMPORAL_ARGS) \
+		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+
+# Poll many snapshots at the same Hz, subsample into a 10s MP4.
+TIMELAPSE_DURATION_SEC ?= 10
+TIMELAPSE_FPS ?= 24
+TIMELAPSE_COUNT ?= 2400
+TIMELAPSE_POLL_HZ ?= 1
+TIMELAPSE_ARGS = --pool $(POOL) --dataset $(DATASET) \
+	--duration-sec $(TIMELAPSE_DURATION_SEC) --fps $(TIMELAPSE_FPS) --count $(TIMELAPSE_COUNT) \
+	--poll-hz $(TIMELAPSE_POLL_HZ)
+
+timelapse:
+	poetry run python -m meteora_bin_atlas.temporal.timelapse $(TIMELAPSE_ARGS) \
 		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
 
 # OHLCV + bounded snapshot series + series CSV in one npm script.
