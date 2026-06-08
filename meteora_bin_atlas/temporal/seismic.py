@@ -10,11 +10,21 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 
-from meteora_bin_atlas.explore.labels import TOKEN_COLORS, bar_color_for_bin
+from meteora_bin_atlas.explore.labels import bar_color_for_bin
 
-# Fixed row height (px) keeps traces thin; rows pack upward from the plot bottom.
-TRACE_ROW_PX = 18
-TRACE_DEFLECTION_RATIO = 0.42
+# Current skyline uses this fraction of plot height; ghosts share the same baseline.
+CURRENT_DEFLECTION_RATIO = 0.36
+GHOST_HISTORY = 7
+CURRENT_FILL_ALPHA = 88
+CURRENT_OUTLINE_ALPHA = 130
+
+# Muted token palette for the blackboard (keeps notebook TOKEN_COLORS unchanged).
+SEISMIC_TOKEN_COLORS = {
+    "X": "#5E4F78",
+    "Y": "#35566E",
+    "mix": "#3F6862",
+    "empty": "#2A3340",
+}
 
 
 @dataclass(frozen=True)
@@ -22,10 +32,9 @@ class SeismicStyle:
     background: tuple[int, int, int] = (6, 10, 18)
     grid_major: tuple[int, int, int, int] = (40, 55, 80, 45)
     grid_minor: tuple[int, int, int, int] = (25, 35, 55, 25)
-    trace_baseline: tuple[int, int, int, int] = (70, 85, 105, 70)
-    active_bin: tuple[int, int, int, int] = (255, 200, 80, 160)
-    hud: tuple[int, int, int, int] = (180, 210, 230, 220)
-    wiggle_outline: tuple[int, int, int, int] = (220, 230, 240, 90)
+    active_bin: tuple[int, int, int, int] = (175, 145, 90, 120)
+    hud: tuple[int, int, int, int] = (150, 165, 180, 200)
+    wiggle_outline: tuple[int, int, int, int] = (160, 170, 185, 70)
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,13 @@ class SnapshotTrace:
     liquidity: np.ndarray
     x_amount: np.ndarray
     y_amount: np.ndarray
+
+
+@dataclass(frozen=True)
+class LayerStyle:
+    fill_alpha: int
+    outline_alpha: int
+    outline_width: int
 
 
 def _bin_distances(zoom_bins: int) -> np.ndarray:
@@ -107,47 +123,92 @@ def _plot_background(plot_width: int, plot_height: int) -> np.ndarray:
     return np.stack([r, g, b], axis=-1)
 
 
-def _x_for_distance(
+def _bin_cell_width(*, zoom_bins: int, plot_left: int, plot_right: int) -> float:
+    return (plot_right - plot_left) / (2 * zoom_bins + 1)
+
+
+def _x_center_for_distance(
     distance: int,
     *,
     zoom_bins: int,
     plot_left: int,
-    plot_right: int,
+    cell_w: float,
 ) -> float:
-    span = plot_right - plot_left
-    return plot_left + ((distance + zoom_bins) / (2 * zoom_bins)) * span
+    return plot_left + (distance + zoom_bins + 0.5) * cell_w
 
 
-def _y_for_trace(
-    trace_index: int,
+def _x_edge_for_distance(
+    distance: int,
     *,
-    plot_bottom: int,
+    zoom_bins: int,
+    plot_left: int,
+    cell_w: float,
 ) -> float:
-    """Oldest snapshot near the bottom; newer snapshots stack directly above."""
-    return plot_bottom - (trace_index + 0.5) * TRACE_ROW_PX
+    return plot_left + (distance + zoom_bins) * cell_w
+
+
+def _muted_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
+    rgb = _hex_to_rgb(hex_color)
+    bg = SeismicStyle.background
+    mute = 0.38 + 0.62 * (0.72 ** layer_age)
+    return tuple(int(bg[i] + (rgb[i] - bg[i]) * mute) for i in range(3))
+
+
+def _ghost_alphas(layer_age: int) -> tuple[int, int]:
+    """Steady-state alpha for a layer `layer_age` snapshots behind the current one."""
+    if layer_age <= 0:
+        return CURRENT_FILL_ALPHA, CURRENT_OUTLINE_ALPHA
+    fill = max(10, int(62 * (0.60 ** layer_age)))
+    outline = max(14, int(78 * (0.64 ** layer_age)))
+    return fill, outline
+
+
+def _layer_style(layer_age: int, transition_blend: float) -> LayerStyle:
+    """
+    Resolve draw style for a layer.
+
+    layer_age 0 = current snapshot (fades in on arrival).
+    layer_age 1 = previous snapshot (fades from current → ghost).
+    layer_age 2+ = progressively fainter fills and outlines.
+    """
+    blend = max(0.0, min(1.0, transition_blend))
+    ghost_fill, ghost_outline = _ghost_alphas(layer_age)
+
+    if layer_age == 0:
+        return LayerStyle(
+            fill_alpha=int(CURRENT_FILL_ALPHA * blend),
+            outline_alpha=int(CURRENT_OUTLINE_ALPHA * blend),
+            outline_width=2,
+        )
+    if layer_age == 1:
+        return LayerStyle(
+            fill_alpha=int(CURRENT_FILL_ALPHA + (ghost_fill - CURRENT_FILL_ALPHA) * blend),
+            outline_alpha=int(CURRENT_OUTLINE_ALPHA + (ghost_outline - CURRENT_OUTLINE_ALPHA) * blend),
+            outline_width=2 if blend < 0.5 else 1,
+        )
+    return LayerStyle(
+        fill_alpha=ghost_fill,
+        outline_alpha=ghost_outline,
+        outline_width=1,
+    )
 
 
 def _draw_grid(
     draw: ImageDraw.ImageDraw,
     *,
     zoom_bins: int,
-    total_traces: int,
     plot_box: tuple[int, int, int, int],
     style: SeismicStyle,
 ) -> None:
     left, top, right, bottom = plot_box
+    cell_w = _bin_cell_width(zoom_bins=zoom_bins, plot_left=left, plot_right=right)
 
     for distance in range(-zoom_bins, zoom_bins + 1):
-        x = _x_for_distance(distance, zoom_bins=zoom_bins, plot_left=left, plot_right=right)
+        x = _x_edge_for_distance(distance, zoom_bins=zoom_bins, plot_left=left, cell_w=cell_w)
         color = style.grid_major if distance % 10 == 0 else style.grid_minor
         draw.line([(x, top), (x, bottom)], fill=color, width=1)
 
-    for trace_index in range(total_traces):
-        y = _y_for_trace(trace_index, plot_bottom=bottom)
-        if top <= y <= bottom:
-            draw.line([(left, y), (right, y)], fill=style.grid_minor, width=1)
-
-    active_x = _x_for_distance(0, zoom_bins=zoom_bins, plot_left=left, plot_right=right)
+    active_x = _x_center_for_distance(0, zoom_bins=zoom_bins, plot_left=left, cell_w=cell_w)
     draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=2)
 
 
@@ -161,20 +222,16 @@ def _draw_horizontal_wiggle_trace(
     zoom_bins: int,
     plot_left: int,
     plot_right: int,
-    style: SeismicStyle,
-    highlight: bool,
+    layer: LayerStyle,
+    layer_age: int,
 ) -> None:
-    draw.line(
-        [(plot_left, trace_y), (plot_right, trace_y)],
-        fill=style.trace_baseline,
-        width=1,
-    )
+    if layer.fill_alpha <= 0 and layer.outline_alpha <= 0:
+        return
 
-    fill_alpha = 200 if highlight else 140
-    outline_alpha = 230 if highlight else style.wiggle_outline[3]
-    outline_width = 2 if highlight else 1
-
+    cell_w = _bin_cell_width(zoom_bins=zoom_bins, plot_left=plot_left, plot_right=plot_right)
     wiggle_points: list[tuple[float, float]] = []
+    empty_rgb = _hex_to_rgb(SEISMIC_TOKEN_COLORS["empty"])
+
     for distance, liquidity, x_amount, y_amount in zip(
         trace.distances,
         trace.liquidity,
@@ -182,35 +239,35 @@ def _draw_horizontal_wiggle_trace(
         trace.y_amount,
         strict=True,
     ):
-        x = _x_for_distance(
-            int(distance),
-            zoom_bins=zoom_bins,
-            plot_left=plot_left,
-            plot_right=plot_right,
-        )
+        dist = int(distance)
+        x_center = _x_center_for_distance(dist, zoom_bins=zoom_bins, plot_left=plot_left, cell_w=cell_w)
         offset = (float(liquidity) / liquidity_scale) * max_deflection
-        wiggle_points.append((x, trace_y - offset))
+        peak_y = trace_y - offset
+        wiggle_points.append((x_center, peak_y))
 
-    for index in range(len(wiggle_points) - 1):
-        x0, y0 = wiggle_points[index]
-        x1, y1 = wiggle_points[index + 1]
-        distance = int(trace.distances[index])
-        color_hex = bar_color_for_bin(
-            float(trace.x_amount[index]),
-            float(trace.y_amount[index]),
-            distance,
-        )
-        rgb = _hex_to_rgb(color_hex)
-        if rgb == _hex_to_rgb(TOKEN_COLORS["empty"]):
+        if layer.fill_alpha <= 0:
             continue
-        polygon = [(x0, trace_y), (x0, y0), (x1, y1), (x1, trace_y)]
-        draw.polygon(polygon, fill=(*rgb, fill_alpha))
 
-    if len(wiggle_points) >= 2:
+        color_hex = bar_color_for_bin(
+            float(x_amount),
+            float(y_amount),
+            dist,
+            colors=SEISMIC_TOKEN_COLORS,
+        )
+        rgb = _muted_rgb(color_hex, layer_age=layer_age)
+        if rgb == empty_rgb:
+            continue
+
+        x_left = _x_edge_for_distance(dist, zoom_bins=zoom_bins, plot_left=plot_left, cell_w=cell_w)
+        x_right = x_left + cell_w
+        polygon = [(x_left, trace_y), (x_left, peak_y), (x_right, peak_y), (x_right, trace_y)]
+        draw.polygon(polygon, fill=(*rgb, layer.fill_alpha))
+
+    if len(wiggle_points) >= 2 and layer.outline_alpha > 0:
         draw.line(
             wiggle_points,
-            fill=(*style.wiggle_outline[:3], outline_alpha),
-            width=outline_width,
+            fill=(*SeismicStyle.wiggle_outline[:3], layer.outline_alpha),
+            width=layer.outline_width,
             joint="curve",
         )
 
@@ -218,7 +275,8 @@ def _draw_horizontal_wiggle_trace(
 def render_seismic_frame(
     traces: list[SnapshotTrace],
     *,
-    visible_count: int,
+    current_index: int,
+    transition_blend: float = 1.0,
     zoom_bins: int,
     liquidity_scale: float,
     token_x: str,
@@ -228,8 +286,8 @@ def render_seismic_frame(
     height: int = 800,
     style: SeismicStyle = SeismicStyle(),
 ) -> np.ndarray:
-    """Render one accumulation frame: thin horizontal traces, oldest bottom → newest top."""
-    visible_count = max(1, min(visible_count, len(traces)))
+    """Render the blackboard: current skyline over fading ghost traces at the same baseline."""
+    current_index = max(0, min(current_index, len(traces) - 1))
     total_traces = len(traces)
 
     img = Image.new("RGBA", (width, height), style.background + (255,))
@@ -239,32 +297,30 @@ def render_seismic_frame(
     img.paste(plot_bg, (left, top))
 
     draw = ImageDraw.Draw(img, "RGBA")
-    _draw_grid(
-        draw,
-        zoom_bins=zoom_bins,
-        total_traces=total_traces,
-        plot_box=plot_box,
-        style=style,
-    )
+    _draw_grid(draw, zoom_bins=zoom_bins, plot_box=plot_box, style=style)
 
-    max_deflection = TRACE_ROW_PX * TRACE_DEFLECTION_RATIO
+    trace_y = (top + bottom) / 2
+    max_deflection = (bottom - top) * CURRENT_DEFLECTION_RATIO
+    first_layer = max(0, current_index - GHOST_HISTORY)
 
-    for trace_index in range(visible_count):
-        trace_y = _y_for_trace(trace_index, plot_bottom=bottom)
+    for layer_index in range(first_layer, current_index + 1):
+        layer_age = current_index - layer_index
+        layer = _layer_style(layer_age, transition_blend)
         _draw_horizontal_wiggle_trace(
             draw,
-            trace=traces[trace_index],
+            trace=traces[layer_index],
             trace_y=trace_y,
             liquidity_scale=liquidity_scale,
             max_deflection=max_deflection,
             zoom_bins=zoom_bins,
             plot_left=left,
             plot_right=right,
-            style=style,
-            highlight=trace_index == visible_count - 1,
+            layer=layer,
+            layer_age=layer_age,
         )
 
-    active_x = _x_for_distance(0, zoom_bins=zoom_bins, plot_left=left, plot_right=right)
+    cell_w = _bin_cell_width(zoom_bins=zoom_bins, plot_left=left, plot_right=right)
+    active_x = _x_center_for_distance(0, zoom_bins=zoom_bins, plot_left=left, cell_w=cell_w)
     draw.text((active_x + 4, top + 4), "active bin", fill=style.hud)
 
     axis_y = height - 72
@@ -276,12 +332,15 @@ def render_seismic_frame(
         fill=style.hud,
     )
 
-    oldest_y = _y_for_trace(0, plot_bottom=bottom)
-    newest_y = _y_for_trace(visible_count - 1, plot_bottom=bottom)
-    draw.text((left - 88, oldest_y + 4), "oldest", fill=(*style.hud[:3], 150))
-    draw.text((left - 88, newest_y - 14), "newest ↑", fill=style.hud)
+    ghost_count = current_index - first_layer
+    if ghost_count > 0:
+        draw.text(
+            (left - 88, trace_y - 8),
+            f"{ghost_count} fading trace{'s' if ghost_count != 1 else ''}",
+            fill=(*style.hud[:3], 140),
+        )
 
-    current = traces[visible_count - 1]
+    current = traces[current_index]
     title = "DLMM liquidity seismogram"
     subtitle = (
         f"{token_x}/{token_y} · {pool_address[:6]}…{pool_address[-4:]} · "
@@ -292,12 +351,20 @@ def render_seismic_frame(
 
     legend_x = right - 210
     legend_y = top + 8
-    draw.text((legend_x, legend_y), f"■ {token_y} (Y)", fill=(*_hex_to_rgb(TOKEN_COLORS["Y"]), 220))
-    draw.text((legend_x, legend_y + 18), f"■ {token_x} (X)", fill=(*_hex_to_rgb(TOKEN_COLORS["X"]), 220))
+    draw.text(
+        (legend_x, legend_y),
+        f"■ {token_y} (Y)",
+        fill=(*_muted_rgb(SEISMIC_TOKEN_COLORS["Y"], layer_age=0), 180),
+    )
+    draw.text(
+        (legend_x, legend_y + 18),
+        f"■ {token_x} (X)",
+        fill=(*_muted_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 180),
+    )
     draw.text(
         (legend_x, legend_y + 36),
         f"■ {token_x} + {token_y}",
-        fill=(*_hex_to_rgb(TOKEN_COLORS["mix"]), 220),
+        fill=(*_muted_rgb(SEISMIC_TOKEN_COLORS["mix"], layer_age=0), 180),
     )
 
     return np.asarray(img.convert("RGB"))

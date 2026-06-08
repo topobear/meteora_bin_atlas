@@ -69,19 +69,27 @@ def build_temporal_mp4(
     frames_per_snapshot = max(1, int(round(frame_duration_sec * fps)))
     frame_arrays: list = []
 
-    for visible_count in range(1, len(traces) + 1):
-        rgb = render_seismic_frame(
-            traces,
-            visible_count=visible_count,
-            zoom_bins=zoom_bins,
-            liquidity_scale=liquidity_scale,
-            token_x=token_x,
-            token_y=token_y,
-            pool_address=pool_address,
-            width=width,
-            height=height,
-        )
-        frame_arrays.extend([rgb] * frames_per_snapshot)
+    fade_fraction = 0.45
+    for current_index in range(len(traces)):
+        fade_frames = max(1, int(round(frames_per_snapshot * fade_fraction)))
+        for frame_i in range(frames_per_snapshot):
+            if current_index == 0:
+                blend = 1.0
+            else:
+                blend = min(1.0, (frame_i + 1) / fade_frames)
+            rgb = render_seismic_frame(
+                traces,
+                current_index=current_index,
+                transition_blend=blend,
+                zoom_bins=zoom_bins,
+                liquidity_scale=liquidity_scale,
+                token_x=token_x,
+                token_y=token_y,
+                pool_address=pool_address,
+                width=width,
+                height=height,
+            )
+            frame_arrays.append(rgb)
 
     if output_path is None:
         PLOTS_DIR.mkdir(parents=True, exist_ok=True)
