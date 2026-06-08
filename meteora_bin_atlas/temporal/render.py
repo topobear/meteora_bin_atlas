@@ -12,6 +12,7 @@ from meteora_bin_atlas.config import DEFAULT_POOL_ADDRESS, get_pool_address
 from meteora_bin_atlas.explore.labels import parse_token_labels
 from meteora_bin_atlas.paths import DATA_PROCESSED, DATA_SIMULATED, PLOTS_DIR
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series, load_simulated_bin_atlas_series
+from meteora_bin_atlas.temporal.reserve import build_price_map, render_reserve_frame
 from meteora_bin_atlas.temporal.seismic import (
     DRIFT_WINDOW_SECONDS,
     GHOST_HISTORY,
@@ -64,6 +65,7 @@ def build_temporal_mp4(
     simulated_dir: Path = DATA_SIMULATED,
     use_simulated: bool = False,
     dpi: int = 150,
+    also_reserve_space: bool = True,
 ) -> Path:
     """Build a seismic-style MP4 from a bin-atlas series CSV for a pool."""
     pool_address = pool_address or get_pool_address()
@@ -176,7 +178,94 @@ def build_temporal_mp4(
             f"({frame_duration_sec}s each) → {len(frame_arrays)} frames, "
             f"{fps} fps, {duration_sec:.1f}s total"
         )
+
+    if also_reserve_space:
+        _render_reserve_space_mp4(
+            traces,
+            atlas_frame=atlas_frame,
+            trace_indices=trace_indices,
+            frames_per_snapshot=frames_per_snapshot,
+            fade_fraction=fade_fraction,
+            one_frame_per_snapshot=one_frame_per_snapshot,
+            liquidity_scale=liquidity_scale,
+            price_for_bin=build_price_map(series_df),
+            token_x=token_x,
+            token_y=token_y,
+            pool_address=pool_address,
+            width=width,
+            height=height,
+            seismic_output_path=output_path,
+            fps=fps,
+        )
+
     return output_path
+
+
+def _render_reserve_space_mp4(
+    traces,
+    *,
+    atlas_frame: GlobalFrame,
+    trace_indices: list[int],
+    frames_per_snapshot: int,
+    fade_fraction: float,
+    one_frame_per_snapshot: bool,
+    liquidity_scale: float,
+    price_for_bin: dict[int, float],
+    token_x: str,
+    token_y: str,
+    pool_address: str,
+    width: int,
+    height: int,
+    seismic_output_path: Path,
+    fps: int,
+) -> Path:
+    """Render the additive reserve-space (x, y) companion MP4.
+
+    Mirrors the seismic viewport/ghost logic so the two videos stay in lockstep,
+    then writes ``<seismic_stem>_reserve.mp4`` beside the seismic output.
+    """
+    frame_arrays: list = []
+    display_frame: GlobalFrame | None = None
+    prior_rendered: list[int] = []
+    for current_index in trace_indices:
+        display_frame = compute_display_frame(
+            traces,
+            current_index,
+            display_frame,
+            atlas=atlas_frame,
+        )
+        ghost_indices = prior_rendered[-GHOST_HISTORY:]
+        fade_frames = 1 if one_frame_per_snapshot else max(1, int(round(frames_per_snapshot * fade_fraction)))
+        for frame_i in range(frames_per_snapshot):
+            if one_frame_per_snapshot or current_index == 0:
+                blend = 1.0
+            else:
+                blend = min(1.0, (frame_i + 1) / fade_frames)
+            frame_arrays.append(
+                render_reserve_frame(
+                    traces,
+                    frame=display_frame,
+                    current_index=current_index,
+                    transition_blend=blend,
+                    ghost_indices=ghost_indices,
+                    liquidity_scale=liquidity_scale,
+                    price_for_bin=price_for_bin,
+                    token_x=token_x,
+                    token_y=token_y,
+                    pool_address=pool_address,
+                    width=width,
+                    height=height,
+                )
+            )
+        prior_rendered.append(current_index)
+
+    reserve_path = seismic_output_path.with_name(
+        f"{seismic_output_path.stem}_reserve{seismic_output_path.suffix}"
+    )
+    encode_mp4(frame_arrays, reserve_path, fps=fps)
+    print(f"Wrote {reserve_path}")
+    print(f"  reserve-space (x, y) companion · {len(frame_arrays)} frames, {fps} fps")
+    return reserve_path
 
 
 def _parse_args() -> argparse.Namespace:
@@ -237,6 +326,11 @@ def _parse_args() -> argparse.Namespace:
         default=150,
         help="Render width/height scale (default: 150 → 2100×1200).",
     )
+    parser.add_argument(
+        "--no-reserve-space",
+        action="store_true",
+        help="Skip the additive reserve-space (x, y) companion MP4.",
+    )
     return parser.parse_args()
 
 
@@ -252,6 +346,7 @@ def main() -> None:
         use_simulated=args.simulated,
         zoom_bins=args.zoom_bins,
         dpi=args.dpi,
+        also_reserve_space=not args.no_reserve_space,
     )
 
 
