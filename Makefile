@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots simulate-series render-mp4 render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal simulate-series render-mp4 render-mp4-demo atlas notebook
 
 # Default pool: SOL-USDC from data/manual_pools.json
 POOL ?= 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
@@ -69,8 +69,9 @@ help:
 	@echo "  make normalize-bins   bin atlas CSV"
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
-	@echo "Snapshot polling (default pool: SOL-USDC)"
-	@echo "  make poll-snapshots     OHLCV + snapshot series + series CSV (one command)"
+	@echo "Temporal (default pool: SOL-USDC)"
+	@echo "  make temporal           fetch/simulate + render 10s MP4 at 24 fps (DATASET=alchemy)"
+	@echo "  make poll-snapshots     OHLCV + snapshot series + series CSV only"
 	@echo "  make fetch-ohlcv        price candles only"
 	@echo "  make fetch-series       bounded snapshot series only"
 	@echo "  make normalize-series   normalize latest series manifest only"
@@ -78,9 +79,11 @@ help:
 	@echo "  make simulate-series    synthetic series from real seed (no RPC; for long MP4s)"
 	@echo "  make render-mp4-demo    simulate-series + render-mp4 (~60s default)"
 	@echo ""
+	@echo "Temporal knobs: DATASET (alchemy|solana-public|simulated), TEMPORAL_DURATION_SEC,"
+	@echo "  TEMPORAL_FPS, TEMPORAL_COUNT, SERIES_BINS_LEFT/RIGHT"
 	@echo "Poll knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
 	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4), SIM_COUNT, SIM_INTERVAL_SEC,"
-	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC, SERIES_BINS_LEFT/RIGHT"
+	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC"
 	@echo ""
 	@echo "Notebook"
 	@echo "  make notebook         launch Jupyter notebook"
@@ -121,9 +124,14 @@ atlas: discover fetch-pool fetch-bins normalize-bins
 
 # --- Snapshot polling pipeline ----------------------------------------------
 
+# End-to-end temporal: live RPC or simulated series → 10s MP4 at 24 fps.
+temporal:
+	poetry run python -m meteora_bin_atlas.temporal.run $(TEMPORAL_ARGS) \
+		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+
 # OHLCV + bounded snapshot series + series CSV in one npm script.
 poll-snapshots:
-	npm run temporal -- $(POLL_SNAPSHOTS_ARGS)
+	npm run temporal -- $(POLL_SNAPSHOTS_ARGS) --dataset $(DATASET)
 
 # Meteora datapi only; fast (~seconds).
 fetch-ohlcv:
@@ -136,6 +144,17 @@ fetch-series:
 # Latest snapshot_series manifest → data/processed/bin_atlas_series_<pool>_<ts>.csv
 normalize-series:
 	npm run normalize:series -- $(POOL_ARGS)
+
+# --- Temporal (make temporal) -----------------------------------------------
+
+# End-to-end: fetch or simulate series, then render MP4.
+# Default: 10 snapshots → 10s MP4 at 24 fps (1s per snapshot).
+DATASET ?= alchemy
+TEMPORAL_DURATION_SEC ?= 10
+TEMPORAL_FPS ?= 24
+TEMPORAL_COUNT ?= 10
+TEMPORAL_ARGS = --pool $(POOL) --dataset $(DATASET) \
+	--duration-sec $(TEMPORAL_DURATION_SEC) --fps $(TEMPORAL_FPS) --count $(TEMPORAL_COUNT)
 
 # --- MP4 render (make render-mp4) -------------------------------------------
 

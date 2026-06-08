@@ -1,14 +1,23 @@
 import path from "node:path";
 
+import {
+  type DatasetId,
+  getDatasetId,
+  resolveRpcDataset,
+} from "../datasets.js";
 import { formatTimestampForFilename } from "../meteora/discoverPools.js";
 import { fetchPoolOhlcv, type OhlcvTimeframe } from "../meteora/fetchPoolOhlcv.js";
-import { fetchSnapshotSeries } from "../meteora/fetchSnapshotSeries.js";
+import {
+  fetchSnapshotSeries,
+  RpcDatasetAbortError,
+} from "../meteora/fetchSnapshotSeries.js";
 import {
   BIN_ATLAS_SERIES_CSV_HEADERS,
   normalizeSnapshotSeries,
 } from "../meteora/normalizeSnapshotSeries.js";
 import { writeCsv } from "../io/writeCsv.js";
 import { writeJson } from "../io/writeJson.js";
+import { formatRpcDatasetWarning, isRpcDatasetError } from "../rpcErrors.js";
 import { getConnection } from "../solana.js";
 
 function getPoolAddress(): string {
@@ -50,6 +59,20 @@ function getPositiveFlagNumber(flag: string, defaultValue: number, label: string
   return Math.trunc(value);
 }
 
+function getOptionalPositiveFlagNumber(flag: string, label: string): number | undefined {
+  const flagIndex = process.argv.indexOf(flag);
+  if (flagIndex === -1 || !process.argv[flagIndex + 1]) {
+    return undefined;
+  }
+
+  const value = Number(process.argv[flagIndex + 1]);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative number.`);
+  }
+
+  return value;
+}
+
 function getTimeframe(): OhlcvTimeframe {
   const flagIndex = process.argv.indexOf("--timeframe");
   const value =
@@ -63,37 +86,50 @@ function getTimeframe(): OhlcvTimeframe {
   return value as OhlcvTimeframe;
 }
 
-function getRpcBackoffSec(): number {
-  const rpcFlagIndex = process.argv.indexOf("--rpc-backoff-sec");
-  const cooldownFlagIndex = process.argv.indexOf("--cooldown-sec");
-  const flagIndex = rpcFlagIndex !== -1 ? rpcFlagIndex : cooldownFlagIndex;
-  const value =
-    flagIndex !== -1 && process.argv[flagIndex + 1] ? Number(process.argv[flagIndex + 1]) : 60;
+function rpcHostFromUrl(rpcUrl: string): string {
+  return new URL(rpcUrl).host;
+}
 
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error("--rpc-backoff-sec must be a non-negative number.");
-  }
+function exitOnRpcDatasetError(error: unknown, dataset: DatasetId): never {
+  const message =
+    error instanceof RpcDatasetAbortError
+      ? error.message
+      : formatRpcDatasetWarning(error, dataset);
 
-  return value;
+  console.warn(`WARNING: ${message}`);
+  console.warn("Temporal fetch aborted — no series CSV written.");
+  process.exit(1);
 }
 
 async function main(): Promise<void> {
+  const dataset = getDatasetId();
+  if (dataset === "simulated") {
+    throw new Error(
+      "simulated dataset skips RPC polling — use `make temporal DATASET=simulated` instead.",
+    );
+  }
+
+  const rpcDataset = resolveRpcDataset(dataset);
   const poolAddress = getPoolAddress();
   const timeframe = getTimeframe();
   const lookbackDays = getPositiveFlagNumber("--lookback-days", 7, "--lookback-days");
   const count = getPositiveFlagNumber("--count", 10, "--count");
-  const intervalSec = getFlagNumber("--interval-sec", 30, "--interval-sec");
-  const rpcBackoffSec = getRpcBackoffSec();
+  const intervalSec =
+    getOptionalPositiveFlagNumber("--interval-sec", "--interval-sec") ?? rpcDataset.intervalSec;
+  const rpcBackoffSec =
+    getOptionalPositiveFlagNumber("--rpc-backoff-sec", "--rpc-backoff-sec") ??
+    rpcDataset.rpcBackoffSec;
   const binsLeft = getFlagNumber("--bins-left", 30, "--bins-left");
   const binsRight = getFlagNumber("--bins-right", 30, "--bins-right");
 
   const pauseSec = rpcBackoffSec + intervalSec;
   const wallMin = Math.round((pauseSec * Math.max(count - 1, 0)) / 60);
   const projectRoot = process.cwd();
-  const connection = getConnection();
+  const connection = getConnection(rpcDataset.rpcUrl);
   const runTimestamp = formatTimestampForFilename();
 
   console.log(`Temporal sample for pool ${poolAddress}`);
+  console.log(`  Dataset: ${dataset} (${rpcHostFromUrl(rpcDataset.rpcUrl)})`);
   console.log(`  OHLCV: ${lookbackDays}d ${timeframe} candles (Meteora datapi)`);
   console.log(
     `  Series: ${count} bounded snapshots (${binsLeft}/${binsRight} bins), ` +
@@ -111,13 +147,22 @@ async function main(): Promise<void> {
   }
   console.log("");
 
-  const manifest = await fetchSnapshotSeries(connection, poolAddress, {
-    count,
-    intervalSec,
-    rpcBackoffSec,
-    projectRoot,
-    bounded: { left: binsLeft, right: binsRight },
-  });
+  let manifest;
+  try {
+    manifest = await fetchSnapshotSeries(connection, poolAddress, {
+      count,
+      intervalSec,
+      rpcBackoffSec,
+      projectRoot,
+      dataset,
+      bounded: { left: binsLeft, right: binsRight },
+    });
+  } catch (error: unknown) {
+    if (error instanceof RpcDatasetAbortError || isRpcDatasetError(error)) {
+      exitOnRpcDatasetError(error, dataset);
+    }
+    throw error;
+  }
 
   const seriesStem = `snapshot_series_${poolAddress}_${runTimestamp}`;
   const manifestPath = path.join(projectRoot, "data", "processed", `${seriesStem}.json`);
@@ -134,6 +179,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
+  const dataset = getDatasetId();
+  if (error instanceof RpcDatasetAbortError || isRpcDatasetError(error)) {
+    exitOnRpcDatasetError(error, dataset);
+  }
+
   const message = error instanceof Error ? error.message : String(error);
   console.error(`Temporal fetch failed: ${message}`);
   process.exit(1);

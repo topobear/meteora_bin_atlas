@@ -4,6 +4,12 @@ import DLMM from "@meteora-ag/dlmm";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 import { writeJson } from "../io/writeJson.js";
+import type { DatasetId } from "../datasets.js";
+import {
+  formatRpcDatasetWarning,
+  isRpcDatasetError,
+  rpcErrorMessage,
+} from "../rpcErrors.js";
 import { formatTimestampForFilename } from "./discoverPools.js";
 import { fetchBoundedBinsFromPool } from "./fetchBinArrays.js";
 import type { BinArraysFetchResult } from "./types.js";
@@ -38,6 +44,7 @@ export type FetchSnapshotSeriesOptions = {
   /** Conservative RPC backoff after each successful snapshot (applied before interval). */
   rpcBackoffSec?: number;
   projectRoot: string;
+  dataset?: DatasetId;
   bounded: {
     left: number;
     right: number;
@@ -51,20 +58,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function formatFetchError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
+export class RpcDatasetAbortError extends Error {
+  readonly dataset: DatasetId;
 
-  if (
-    message === "fetch failed" ||
-    lower.includes("429") ||
-    lower.includes("too many") ||
-    lower.includes("rate limit")
-  ) {
-    return `${message} (likely Solana RPC rate limit — increase --rpc-backoff-sec or use a private RPC)`;
+  constructor(dataset: DatasetId, cause: unknown) {
+    super(formatRpcDatasetWarning(cause, dataset));
+    this.name = "RpcDatasetAbortError";
+    this.dataset = dataset;
+  }
+}
+
+function formatFetchError(error: unknown, dataset: DatasetId): string {
+  if (isRpcDatasetError(error)) {
+    return formatRpcDatasetWarning(error, dataset);
   }
 
-  return message;
+  return rpcErrorMessage(error);
 }
 
 async function fetchBoundedSnapshotWithRetry(
@@ -72,6 +81,7 @@ async function fetchBoundedSnapshotWithRetry(
   poolAddress: string,
   left: number,
   right: number,
+  dataset: DatasetId,
   maxAttempts = RETRY_BACKOFF_SEC.length,
 ): Promise<BinArraysFetchResult> {
   let lastError: unknown;
@@ -81,13 +91,18 @@ async function fetchBoundedSnapshotWithRetry(
       return await fetchBoundedBinsFromPool(dlmmPool, poolAddress, left, right);
     } catch (error: unknown) {
       lastError = error;
+
+      if (isRpcDatasetError(error)) {
+        throw new RpcDatasetAbortError(dataset, error);
+      }
+
       if (attempt === maxAttempts) {
         break;
       }
 
       const waitSec = RETRY_BACKOFF_SEC[attempt - 1] ?? 180;
       console.warn(
-        `Snapshot fetch failed (attempt ${attempt}/${maxAttempts}): ${formatFetchError(error)}`,
+        `Snapshot fetch failed (attempt ${attempt}/${maxAttempts}): ${formatFetchError(error, dataset)}`,
       );
       console.warn(`Retry backoff ${waitSec}s...`);
       await sleep(waitSec * 1000);
@@ -140,12 +155,27 @@ export async function fetchSnapshotSeries(
   const seriesStartedAtUtc = new Date().toISOString();
   const snapshots: SnapshotSeriesEntry[] = [];
   const rpcBackoffSec = options.rpcBackoffSec ?? 60;
+  const dataset = options.dataset ?? "alchemy";
   const { left, right } = options.bounded;
 
-  const dlmmPool = await DLMM.create(connection, new PublicKey(poolAddress));
+  let dlmmPool: Awaited<ReturnType<typeof DLMM.create>>;
+  try {
+    dlmmPool = await DLMM.create(connection, new PublicKey(poolAddress));
+  } catch (error: unknown) {
+    if (isRpcDatasetError(error)) {
+      throw new RpcDatasetAbortError(dataset, error);
+    }
+    throw error;
+  }
 
   for (let index = 0; index < options.count; index += 1) {
-    const result = await fetchBoundedSnapshotWithRetry(dlmmPool, poolAddress, left, right);
+    const result = await fetchBoundedSnapshotWithRetry(
+      dlmmPool,
+      poolAddress,
+      left,
+      right,
+      dataset,
+    );
     const { rawFilename } = await writeSnapshotRaw(options.projectRoot, poolAddress, result);
 
     snapshots.push({
