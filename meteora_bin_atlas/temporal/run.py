@@ -15,8 +15,8 @@ from meteora_bin_atlas.temporal.datasets import (
     DATASET_IDS,
     DEFAULT_DATASET,
     DEFAULT_POLL_HZ,
+    log_fetch_source,
     poll_interval_sec,
-    resolve_rpc_dataset,
 )
 from meteora_bin_atlas.temporal.render import build_temporal_mp4
 from meteora_bin_atlas.temporal.simulate import build_simulated_series
@@ -45,7 +45,7 @@ def _fetch_live_series(
     bins_right: int,
     project_root: Path,
 ) -> None:
-    rpc_dataset = resolve_rpc_dataset(dataset)
+    rpc_dataset = log_fetch_source(dataset)
     env = os.environ.copy()
     env["SOLANA_RPC_URL"] = rpc_dataset.rpc_url
 
@@ -70,7 +70,7 @@ def _fetch_live_series(
         str(bins_right),
     ]
 
-    print(f"Fetching live series via {dataset} ({rpc_dataset.rpc_host})...")
+    print(f"Fetching live series ({snapshot_count} snapshots)...")
     result = subprocess.run(cmd, cwd=project_root, env=env, check=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -116,6 +116,7 @@ def run_temporal(
     series_csv: Path | None = None
 
     if dataset == "simulated":
+        print("Source: simulated")
         _, series_csv = build_simulated_series(
             pool_address,
             snapshot_count=snapshot_count,
@@ -123,7 +124,7 @@ def run_temporal(
             processed_dir=project_root / "data" / "processed",
         )
     else:
-        rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
+        log_fetch_source(dataset, poll_hz=poll_hz)
         _fetch_live_series(
             pool_address=pool_address,
             dataset=dataset,

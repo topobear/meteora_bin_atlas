@@ -1,5 +1,11 @@
 const METEORA_DATAPI_BASE = "https://dlmm.datapi.meteora.ag";
 
+export const METEORA_DATAPI_HOST = "dlmm.datapi.meteora.ag";
+
+export function logMeteoraDatapiSource(): void {
+  console.log(`Source: meteora-datapi (${METEORA_DATAPI_HOST})`);
+}
+
 export type OhlcvTimeframe = "5m" | "30m" | "1h" | "2h" | "4h" | "12h" | "24h";
 
 export type OhlcvCandle = {
@@ -82,6 +88,7 @@ export async function fetchPoolOhlcv(
   poolAddress: string,
   options?: FetchPoolOhlcvOptions,
 ): Promise<OhlcvFetchResult> {
+  logMeteoraDatapiSource();
   const fetchedAtUtc = new Date().toISOString();
   const timeframe = options?.timeframe ?? "1h";
   const endTime = options?.endTime ?? Math.floor(Date.now() / 1000);

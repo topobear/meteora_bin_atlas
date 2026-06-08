@@ -12,8 +12,8 @@ from meteora_bin_atlas.temporal.datasets import (
     DATASET_IDS,
     DEFAULT_DATASET,
     DEFAULT_POLL_HZ,
+    log_fetch_source,
     poll_interval_sec,
-    resolve_rpc_dataset,
 )
 from meteora_bin_atlas.temporal.render import build_temporal_mp4
 from meteora_bin_atlas.temporal.run import _expected_snapshot_count, _fetch_live_series, _project_root
@@ -66,6 +66,7 @@ def run_timelapse(
     series_csv: Path | None = None
 
     if dataset == "simulated":
+        print("Source: simulated")
         _, series_csv = build_simulated_series(
             pool_address,
             snapshot_count=snapshot_count,
@@ -73,7 +74,7 @@ def run_timelapse(
             processed_dir=project_root / "data" / "processed",
         )
     else:
-        rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
+        log_fetch_source(dataset, poll_hz=poll_hz)
         _fetch_live_series(
             pool_address=pool_address,
             dataset=dataset,

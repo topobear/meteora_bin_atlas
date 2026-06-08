@@ -158,6 +158,8 @@ export async function fetchSnapshotSeries(
   const dataset = options.dataset ?? "alchemy";
   const { left, right } = options.bounded;
 
+  console.log(`Source: ${dataset} (Solana RPC)`);
+
   let dlmmPool: Awaited<ReturnType<typeof DLMM.create>>;
   try {
     dlmmPool = await DLMM.create(connection, new PublicKey(poolAddress));
