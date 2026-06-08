@@ -4,6 +4,7 @@ from meteora_bin_atlas.config import RpcInfo, get_rpc_info
 from meteora_bin_atlas.paths import (
     DATA_PROCESSED,
     DATA_RAW,
+    DATA_SIMULATED,
     PLOTS_DIR,
     PROJECT_ROOT,
     all_matching,
@@ -16,6 +17,7 @@ __version__ = "0.1.0"
 __all__ = [
     "DATA_PROCESSED",
     "DATA_RAW",
+    "DATA_SIMULATED",
     "PLOTS_DIR",
     "PROJECT_ROOT",
     "RpcInfo",

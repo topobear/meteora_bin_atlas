@@ -19,6 +19,7 @@ def resolve_project_root(start: Path | None = None) -> Path:
 PROJECT_ROOT = resolve_project_root(Path(__file__).resolve().parent)
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
+DATA_SIMULATED = PROJECT_ROOT / "data" / "simulated"
 PLOTS_DIR = PROJECT_ROOT / "plots"
 
 

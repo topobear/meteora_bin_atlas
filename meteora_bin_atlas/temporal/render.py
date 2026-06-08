@@ -10,8 +10,8 @@ import pandas as pd
 
 from meteora_bin_atlas.config import DEFAULT_POOL_ADDRESS, get_pool_address
 from meteora_bin_atlas.explore.labels import parse_token_labels
-from meteora_bin_atlas.paths import DATA_PROCESSED, PLOTS_DIR
-from meteora_bin_atlas.temporal.load import load_bin_atlas_series
+from meteora_bin_atlas.paths import DATA_PROCESSED, DATA_SIMULATED, PLOTS_DIR
+from meteora_bin_atlas.temporal.load import load_bin_atlas_series, load_simulated_bin_atlas_series
 from meteora_bin_atlas.temporal.seismic import (
     GHOST_HISTORY,
     GlobalFrame,
@@ -60,9 +60,11 @@ def build_temporal_mp4(
     output_stem_prefix: str = "temporal",
     zoom_bins: int = 30,
     processed_dir: Path = DATA_PROCESSED,
+    simulated_dir: Path = DATA_SIMULATED,
+    use_simulated: bool = False,
     dpi: int = 150,
 ) -> Path:
-    """Build a seismic-style MP4 from the latest bin-atlas series CSV for a pool."""
+    """Build a seismic-style MP4 from a bin-atlas series CSV for a pool."""
     pool_address = pool_address or get_pool_address()
 
     if series_csv is not None:
@@ -70,6 +72,11 @@ def build_temporal_mp4(
         if "fetched_at_utc" in series_df.columns:
             series_df["fetched_at_utc"] = pd.to_datetime(series_df["fetched_at_utc"], utc=True)
         series_source = series_csv
+    elif use_simulated:
+        series_df, series_source = load_simulated_bin_atlas_series(
+            pool_address,
+            simulated_dir=simulated_dir,
+        )
     else:
         series_df, series_source = load_bin_atlas_series(pool_address, processed_dir=processed_dir)
 
@@ -180,6 +187,11 @@ def _parse_args() -> argparse.Namespace:
         help="Explicit bin_atlas_series CSV path (overrides --pool lookup).",
     )
     parser.add_argument(
+        "--simulated",
+        action="store_true",
+        help="Load latest series from data/simulated (default: data/processed).",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -226,6 +238,7 @@ def main() -> None:
         frame_duration_sec=args.frame_duration,
         fps=args.fps,
         one_frame_per_snapshot=args.one_frame_per_snapshot,
+        use_simulated=args.simulated,
         zoom_bins=args.zoom_bins,
         dpi=args.dpi,
     )

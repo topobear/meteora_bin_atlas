@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from meteora_bin_atlas.paths import DATA_PROCESSED, latest_matching
+from meteora_bin_atlas.paths import DATA_PROCESSED, DATA_SIMULATED, latest_matching
 
 
 def load_pool_ohlcv(
@@ -53,17 +53,51 @@ def load_snapshot_series_manifest(
     return manifest, path
 
 
+def _format_timestamp_for_filename(iso_utc: str) -> str:
+    """Match TypeScript ``formatTimestampForFilename`` used for series CSV stems."""
+    return iso_utc.replace(":", "-").replace(".", "-")
+
+
+def _read_bin_atlas_series_csv(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    if "fetched_at_utc" in df.columns:
+        df["fetched_at_utc"] = pd.to_datetime(df["fetched_at_utc"], utc=True)
+    return df
+
+
+def load_real_bin_atlas_series(
+    pool_address: str,
+    *,
+    processed_dir: Path = DATA_PROCESSED,
+) -> tuple[pd.DataFrame, Path]:
+    """Load the latest RPC-fetched series CSV linked to a snapshot_series manifest."""
+    manifest, manifest_path = load_snapshot_series_manifest(pool_address, processed_dir=processed_dir)
+    stamp = _format_timestamp_for_filename(manifest["series_completed_at_utc"])
+    path = processed_dir / f"bin_atlas_series_{pool_address}_{stamp}.csv"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Real series CSV not found for manifest {manifest_path.name}: {path}"
+        )
+    return _read_bin_atlas_series_csv(path), path
+
+
 def load_bin_atlas_series(
     pool_address: str,
     *,
     processed_dir: Path = DATA_PROCESSED,
 ) -> tuple[pd.DataFrame, Path]:
-    """Load the latest combined bin-atlas series CSV for a pool."""
-    path = latest_matching(processed_dir, f"bin_atlas_series_{pool_address}_*.csv")
-    df = pd.read_csv(path)
-    if "fetched_at_utc" in df.columns:
-        df["fetched_at_utc"] = pd.to_datetime(df["fetched_at_utc"], utc=True)
-    return df, path
+    """Load the latest real bin-atlas series CSV for a pool from ``data/processed``."""
+    return load_real_bin_atlas_series(pool_address, processed_dir=processed_dir)
+
+
+def load_simulated_bin_atlas_series(
+    pool_address: str,
+    *,
+    simulated_dir: Path = DATA_SIMULATED,
+) -> tuple[pd.DataFrame, Path]:
+    """Load the latest simulated bin-atlas series CSV for a pool from ``data/simulated``."""
+    path = latest_matching(simulated_dir, f"bin_atlas_series_{pool_address}_*.csv")
+    return _read_bin_atlas_series_csv(path), path
 
 
 def summarize_bin_atlas_series(df: pd.DataFrame) -> pd.DataFrame:

@@ -121,7 +121,8 @@ def run_temporal(
             pool_address,
             snapshot_count=snapshot_count,
             interval_sec=interval_sec,
-            processed_dir=project_root / "data" / "processed",
+            seed_dir=project_root / "data" / "processed",
+            simulated_dir=project_root / "data" / "simulated",
         )
     else:
         rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
@@ -150,7 +151,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "End-to-end temporal pipeline: fetch or simulate bin-atlas series, "
-            "then render MP4 (default: 240 snaps @ 1 Hz → 10s at 24 fps, 1 snap = 1 frame)."
+            f"then render MP4 (default: 240 snaps @ {DEFAULT_POLL_HZ:g} Hz → 10s at 24 fps, 1 snap = 1 frame)."
         ),
     )
     parser.add_argument(
@@ -189,7 +190,7 @@ def _parse_args() -> argparse.Namespace:
         "--poll-hz",
         type=float,
         default=DEFAULT_POLL_HZ,
-        help="Live RPC poll rate in snapshots/second (default: 2).",
+        help=f"Live RPC poll rate in snapshots/second (default: {DEFAULT_POLL_HZ:g}).",
     )
     parser.add_argument(
         "--bins-left",

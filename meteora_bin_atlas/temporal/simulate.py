@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from meteora_bin_atlas.config import DEFAULT_POOL_ADDRESS, get_pool_address
-from meteora_bin_atlas.paths import DATA_PROCESSED
+from meteora_bin_atlas.paths import DATA_PROCESSED, DATA_SIMULATED
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series
 
 # Empirical active-bin steps from the SOL-USDC poll (snapshot deltas).
@@ -328,12 +328,12 @@ def write_simulated_series_csv(
     df: pd.DataFrame,
     *,
     pool_address: str,
-    processed_dir: Path = DATA_PROCESSED,
+    simulated_dir: Path = DATA_SIMULATED,
 ) -> Path:
-    """Write simulated series CSV using the same naming convention as normalize:series."""
-    processed_dir.mkdir(parents=True, exist_ok=True)
+    """Write simulated series CSV under ``data/simulated``."""
+    simulated_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3] + "Z"
-    path = processed_dir / f"bin_atlas_series_{pool_address}_{stamp}.csv"
+    path = simulated_dir / f"bin_atlas_series_{pool_address}_{stamp}.csv"
     df.to_csv(path, index=False)
     return path
 
@@ -345,10 +345,11 @@ def build_simulated_series(
     interval_sec: float = 10.0,
     seed_index: int | None = None,
     seed_csv: Path | None = None,
-    processed_dir: Path = DATA_PROCESSED,
+    seed_dir: Path = DATA_PROCESSED,
+    simulated_dir: Path = DATA_SIMULATED,
     rng_seed: int | None = None,
 ) -> tuple[pd.DataFrame, Path]:
-    """Load a real seed series, simulate, and write CSV for render-mp4."""
+    """Seed from a real series in ``data/processed``, simulate, write to ``data/simulated``."""
     pool_address = pool_address or get_pool_address()
     rng = np.random.default_rng(rng_seed)
 
@@ -358,7 +359,7 @@ def build_simulated_series(
             series_df["fetched_at_utc"] = pd.to_datetime(series_df["fetched_at_utc"], utc=True)
         seed_source = seed_csv
     else:
-        series_df, seed_source = load_bin_atlas_series(pool_address, processed_dir=processed_dir)
+        series_df, seed_source = load_bin_atlas_series(pool_address, processed_dir=seed_dir)
 
     seed = _seed_snapshot(series_df, seed_index)
     simulated = simulate_bin_atlas_series(
@@ -367,7 +368,11 @@ def build_simulated_series(
         interval_sec=interval_sec,
         rng=rng,
     )
-    output_path = write_simulated_series_csv(simulated, pool_address=pool_address, processed_dir=processed_dir)
+    output_path = write_simulated_series_csv(
+        simulated,
+        pool_address=pool_address,
+        simulated_dir=simulated_dir,
+    )
 
     print(f"Seed: {seed_source} (snapshot_index={seed['snapshot_index'].iloc[0]})")
     print(f"Wrote {output_path}")
@@ -378,8 +383,8 @@ def build_simulated_series(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Simulate a long bin_atlas_series CSV from a real seed snapshot "
-            "(for render-mp4 without RPC polling)."
+            "Simulate a long bin_atlas_series CSV from a real seed in data/processed "
+            "and write to data/simulated."
         ),
     )
     parser.add_argument(

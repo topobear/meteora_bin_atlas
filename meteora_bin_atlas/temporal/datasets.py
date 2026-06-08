@@ -11,8 +11,8 @@ DEFAULT_DATASET = "alchemy"
 ALCHEMY_DASHBOARD_URL = "https://dashboard.alchemy.com"
 SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com"
 
-# Default temporal pacing: 1 Hz poll on Alchemy (see FETCH_LATENCY_SEC).
-DEFAULT_POLL_HZ = 1.0
+# Default temporal pacing: 1.5 Hz poll on Alchemy (see FETCH_LATENCY_SEC).
+DEFAULT_POLL_HZ = 1.5
 # Empirical bounded-fetch RPC latency on Alchemy; used to convert poll Hz → interval.
 FETCH_LATENCY_SEC = 0.10
 

@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal timelapse simulate-series render-mp4 render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal temporal-simulated timelapse timelapse-simulated simulate-series render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
 ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
@@ -75,20 +75,26 @@ help:
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
 	@echo "Temporal (default pool: SOL-USDC)"
-	@echo "  make temporal           240 snaps @ 1Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
-	@echo "  make timelapse          2400 snaps @ 1Hz → 10s MP4 @ 24fps (subsampled timelapse)"
+	@echo "  make temporal           240 snaps @ 1.5Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
+	@echo "                          DATASET=simulated → no RPC (~seconds)"
+	@echo "  make temporal-simulated alias for temporal DATASET=simulated"
+	@echo "  make timelapse          2400 snaps @ 1.5Hz → 10s MP4 @ 24fps (subsampled timelapse)"
+	@echo "                          DATASET=simulated → no RPC, 480 snaps default (~1 min)"
+	@echo "  make timelapse-simulated  alias for timelapse DATASET=simulated"
 	@echo "  make poll-snapshots     OHLCV + snapshot series + series CSV only"
 	@echo "  make fetch-ohlcv        price candles only"
 	@echo "  make fetch-series       bounded snapshot series only"
 	@echo "  make normalize-series   normalize latest series manifest only"
-	@echo "  make render-mp4         MP4 from latest bin_atlas_series CSV (needs ffmpeg)"
-	@echo "  make simulate-series    synthetic series from real seed (no RPC; for long MP4s)"
-	@echo "  make render-mp4-demo    simulate-series + render-mp4 (~60s default)"
+	@echo "  make render-mp4         MP4 from latest real bin_atlas_series CSV (needs ffmpeg)"
+	@echo "  make simulate-series    synthetic series → data/simulated (seed from data/processed)"
+	@echo "  make render-mp4-demo    simulate-series + render-mp4 --simulated (~60s default)"
 	@echo ""
-	@echo "Temporal knobs: DATASET, TEMPORAL_COUNT (240), TEMPORAL_POLL_HZ (1),"
-	@echo "  TEMPORAL_FPS (24), TEMPORAL_DURATION_SEC (10), SERIES_BINS_LEFT/RIGHT"
-	@echo "Timelapse knobs: TIMELAPSE_COUNT (2400), TIMELAPSE_POLL_HZ (1),"
-	@echo "  TIMELAPSE_FPS (24), TIMELAPSE_DURATION_SEC (10)"
+	@echo "Temporal knobs: DATASET, TEMPORAL_COUNT (240), TEMPORAL_POLL_HZ (1.5),"
+	@echo "  TEMPORAL_FPS (24), TEMPORAL_DURATION_SEC (10), TEMPORAL_OUTPUT (optional MP4 path),"
+	@echo "  SERIES_BINS_LEFT/RIGHT"
+	@echo "Timelapse knobs: TIMELAPSE_COUNT (2400), TIMELAPSE_SIM_COUNT (480),"
+	@echo "  TIMELAPSE_POLL_HZ (1.5), TIMELAPSE_FPS (24), TIMELAPSE_DURATION_SEC (10),"
+	@echo "  TIMELAPSE_OUTPUT (optional MP4 path)"
 	@echo "Poll knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
 	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4), SIM_COUNT, SIM_INTERVAL_SEC,"
 	@echo "  SERIES_COUNT, SERIES_RPC_BACKOFF_SEC, SERIES_INTERVAL_SEC"
@@ -116,8 +122,8 @@ alchemy-dashboard:
 
 # Delete fetched JSON/CSV; keeps .gitkeep and data/manual_pools.json. Does not touch plots/.
 clear-data:
-	@echo "Clearing data/raw and data/processed..."
-	@find data/raw data/processed -type f ! -name '.gitkeep' -delete
+	@echo "Clearing data/raw, data/processed, and data/simulated..."
+	@find data/raw data/processed data/simulated -type f ! -name '.gitkeep' -delete
 	@echo "Done."
 
 # --- Single-snapshot pipeline -------------------------------------------------
@@ -143,15 +149,17 @@ atlas: discover fetch-pool fetch-bins normalize-bins
 
 # --- Temporal (make temporal) -----------------------------------------------
 
-# Poll 240 snapshots @ 1 Hz (~4 min), render 1 snap = 1 frame → 10s MP4 at 24 fps.
+# Poll 240 snapshots @ 1.5 Hz (~3 min), render 1 snap = 1 frame → 10s MP4 at 24 fps.
 DATASET ?= alchemy
 TEMPORAL_DURATION_SEC ?= 10
 TEMPORAL_FPS ?= 24
 TEMPORAL_COUNT ?= 240
-TEMPORAL_POLL_HZ ?= 1
+TEMPORAL_POLL_HZ ?= 1.5
+TEMPORAL_OUTPUT ?=
+TEMPORAL_OUTPUT_ARGS = $(if $(TEMPORAL_OUTPUT),--output $(TEMPORAL_OUTPUT),)
 TEMPORAL_ARGS = --pool $(POOL) --dataset $(DATASET) \
 	--duration-sec $(TEMPORAL_DURATION_SEC) --fps $(TEMPORAL_FPS) --count $(TEMPORAL_COUNT) \
-	--poll-hz $(TEMPORAL_POLL_HZ)
+	--poll-hz $(TEMPORAL_POLL_HZ) $(TEMPORAL_OUTPUT_ARGS)
 
 # --- Snapshot polling pipeline ----------------------------------------------
 
@@ -159,18 +167,28 @@ temporal:
 	poetry run python -m meteora_bin_atlas.temporal.run $(TEMPORAL_ARGS) \
 		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
 
+temporal-simulated:
+	$(MAKE) temporal DATASET=simulated
+
 # Poll many snapshots at the same Hz, subsample into a 10s MP4.
 TIMELAPSE_DURATION_SEC ?= 10
 TIMELAPSE_FPS ?= 24
-TIMELAPSE_COUNT ?= 2400
-TIMELAPSE_POLL_HZ ?= 1
+# Simulated runs skip RPC; default to fewer snaps unless TIMELAPSE_COUNT is set.
+TIMELAPSE_SIM_COUNT ?= 480
+TIMELAPSE_COUNT ?= $(if $(filter simulated,$(DATASET)),$(TIMELAPSE_SIM_COUNT),2400)
+TIMELAPSE_POLL_HZ ?= 1.5
+TIMELAPSE_OUTPUT ?=
+TIMELAPSE_OUTPUT_ARGS = $(if $(TIMELAPSE_OUTPUT),--output $(TIMELAPSE_OUTPUT),)
 TIMELAPSE_ARGS = --pool $(POOL) --dataset $(DATASET) \
 	--duration-sec $(TIMELAPSE_DURATION_SEC) --fps $(TIMELAPSE_FPS) --count $(TIMELAPSE_COUNT) \
-	--poll-hz $(TIMELAPSE_POLL_HZ)
+	--poll-hz $(TIMELAPSE_POLL_HZ) $(TIMELAPSE_OUTPUT_ARGS)
 
 timelapse:
 	poetry run python -m meteora_bin_atlas.temporal.timelapse $(TIMELAPSE_ARGS) \
 		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+
+timelapse-simulated:
+	$(MAKE) timelapse DATASET=simulated
 
 # OHLCV + bounded snapshot series + series CSV in one npm script.
 poll-snapshots:
@@ -208,7 +226,10 @@ simulate-series:
 render-mp4:
 	poetry run python -m meteora_bin_atlas.temporal.render --pool $(POOL) $(RENDER_ARGS)
 
-render-mp4-demo: simulate-series render-mp4
+render-mp4-simulated:
+	poetry run python -m meteora_bin_atlas.temporal.render --pool $(POOL) --simulated $(RENDER_ARGS)
+
+render-mp4-demo: simulate-series render-mp4-simulated
 
 # --- Notebook ---------------------------------------------------------------
 

@@ -21,7 +21,7 @@ from meteora_bin_atlas.temporal.simulate import build_simulated_series
 
 DEFAULT_DURATION_SEC = 10.0
 DEFAULT_FPS = 24
-# 40 min @ 1 Hz — compressed into a 10s MP4 (240 frames @ 24 fps).
+# ~27 min @ 1.5 Hz — compressed into a 10s MP4 (240 frames @ 24 fps).
 DEFAULT_SNAPSHOT_COUNT = 2400
 
 
@@ -71,7 +71,8 @@ def run_timelapse(
             pool_address,
             snapshot_count=snapshot_count,
             interval_sec=interval_sec,
-            processed_dir=project_root / "data" / "processed",
+            seed_dir=project_root / "data" / "processed",
+            simulated_dir=project_root / "data" / "simulated",
         )
     else:
         rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
@@ -103,7 +104,7 @@ def _parse_args() -> argparse.Namespace:
         description=(
             "Timelapse pipeline: poll many bin-atlas snapshots at the usual rate, "
             "then subsample into a short MP4 "
-            f"(default: {DEFAULT_SNAPSHOT_COUNT} snaps @ 1 Hz → 10s at 24 fps)."
+            f"(default: {DEFAULT_SNAPSHOT_COUNT} snaps @ {DEFAULT_POLL_HZ:g} Hz → 10s at 24 fps)."
         ),
     )
     parser.add_argument(
@@ -138,14 +139,14 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_SNAPSHOT_COUNT,
         help=(
             f"Number of snapshots to poll (default: {DEFAULT_SNAPSHOT_COUNT} "
-            f"≈ {DEFAULT_SNAPSHOT_COUNT / DEFAULT_POLL_HZ / 60:.0f} min @ 1 Hz)."
+            f"≈ {DEFAULT_SNAPSHOT_COUNT / DEFAULT_POLL_HZ / 60:.0f} min @ {DEFAULT_POLL_HZ:g} Hz)."
         ),
     )
     parser.add_argument(
         "--poll-hz",
         type=float,
         default=DEFAULT_POLL_HZ,
-        help="Live RPC poll rate in snapshots/second (default: 1).",
+        help=f"Live RPC poll rate in snapshots/second (default: {DEFAULT_POLL_HZ:g}).",
     )
     parser.add_argument(
         "--bins-left",
