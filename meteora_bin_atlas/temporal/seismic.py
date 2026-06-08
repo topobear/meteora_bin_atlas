@@ -22,11 +22,11 @@ ZOOM_IN_RATIO = 0.72
 MIN_DISPLAY_BINS = 25
 CURRENT_FILL_ALPHA = 28
 CURRENT_OUTLINE_ALPHA = 220
-GHOST_FILL_BASE = 0
-GHOST_FILL_DECAY = 0.5
-GHOST_OUTLINE_BASE = 140
-GHOST_OUTLINE_DECAY = 0.62
-GHOST_FILL_CUTOFF_AGE = 0
+GHOST_FILL_BASE = 18
+GHOST_FILL_DECAY = 0.55
+GHOST_OUTLINE_BASE = 160
+GHOST_OUTLINE_DECAY = 0.68
+GHOST_FILL_CUTOFF_AGE = 6
 GHOST_TRACE_Y_OFFSET = 3.0
 GHOST_TRACE_X_DRIFT = 0.35
 
@@ -39,6 +39,10 @@ SEISMIC_TOKEN_COLORS = {
 }
 
 _TRACE_OUTLINE_BASE = (232, 244, 255)
+TITLE_FONT_SIZE = 27
+SUBTITLE_FONT_SIZE = 21
+HUD_FONT_SIZE = 20
+CHANNEL_FONT_SIZE = 18
 _MONO_FONT_CANDIDATES = (
     "/System/Library/Fonts/Menlo.ttc",
     "/System/Library/Fonts/Supplemental/Courier New.ttf",
@@ -446,12 +450,28 @@ def _draw_horizontal_wiggle_trace(
         )
 
 
+def _resolve_ghost_layers(
+    current_index: int,
+    ghost_indices: list[int] | None,
+) -> list[tuple[int, int]]:
+    """Return (trace_index, layer_age) pairs oldest-first for ghost + current layers."""
+    if ghost_indices is None:
+        first_layer = max(0, current_index - GHOST_HISTORY)
+        return [(idx, current_index - idx) for idx in range(first_layer, current_index + 1)]
+
+    clipped = [idx for idx in ghost_indices[-GHOST_HISTORY:] if idx < current_index]
+    layers = [(idx, len(clipped) - i) for i, idx in enumerate(clipped)]
+    layers.append((current_index, 0))
+    return layers
+
+
 def render_seismic_frame(
     traces: list[SnapshotTrace],
     *,
     frame: GlobalFrame,
     current_index: int,
     transition_blend: float = 1.0,
+    ghost_indices: list[int] | None = None,
     zoom_bins: int | None = None,
     liquidity_scale: float,
     token_x: str,
@@ -467,25 +487,24 @@ def render_seismic_frame(
     total_traces = len(traces)
 
     img = Image.new("RGBA", (width, height), style.background + (255,))
-    plot_box = (100, 70, width - 30, height - 90)
+    plot_box = (120, 100, width - 30, height - 100)
     left, top, right, bottom = plot_box
     plot_bg = Image.fromarray(_plot_background(right - left, bottom - top), mode="RGB")
     img.paste(plot_bg, (left, top))
 
     draw = ImageDraw.Draw(img, "RGBA")
-    title_font = _load_mono_font(18)
-    subtitle_font = _load_mono_font(14)
-    hud_font = _load_mono_font(13)
-    channel_font = _load_mono_font(12)
+    title_font = _load_mono_font(TITLE_FONT_SIZE)
+    subtitle_font = _load_mono_font(SUBTITLE_FONT_SIZE)
+    hud_font = _load_mono_font(HUD_FONT_SIZE)
+    channel_font = _load_mono_font(CHANNEL_FONT_SIZE)
 
     trace_y = float(bottom)
     _draw_grid(draw, frame=frame, plot_box=plot_box, trace_y=trace_y, style=style)
 
     max_deflection = (bottom - top) * CURRENT_DEFLECTION_RATIO
-    first_layer = max(0, current_index - GHOST_HISTORY)
+    ghost_layers = _resolve_ghost_layers(current_index, ghost_indices)
 
-    for layer_index in range(first_layer, current_index + 1):
-        layer_age = current_index - layer_index
+    for layer_index, layer_age in ghost_layers:
         layer = _layer_style(layer_age, transition_blend)
         layer_trace_y = trace_y - layer_age * GHOST_TRACE_Y_OFFSET
         _draw_horizontal_wiggle_trace(
@@ -501,14 +520,13 @@ def render_seismic_frame(
             layer_age=layer_age,
         )
 
-    channel_x = left - 84
-    for layer_index in range(first_layer, current_index + 1):
-        layer_age = current_index - layer_index
+    channel_x = left - 118
+    for layer_index, layer_age in ghost_layers:
         layer_trace_y = trace_y - layer_age * GHOST_TRACE_Y_OFFSET
         label = "NOW" if layer_age == 0 else f"T-{layer_age}"
         alpha = 220 if layer_age == 0 else max(50, int(180 * (GHOST_OUTLINE_DECAY**layer_age)))
         draw.text(
-            (channel_x, layer_trace_y - 10),
+            (channel_x, layer_trace_y - 14),
             label,
             fill=(*_trace_outline_rgb(layer_age), alpha),
             font=channel_font,
@@ -524,11 +542,11 @@ def render_seismic_frame(
         font=hud_font,
     )
 
-    axis_y = height - 72
+    axis_y = height - 88
     draw.text((left, axis_y), str(frame.bin_id_min), fill=style.hud, font=hud_font)
-    draw.text((right - 72, axis_y), str(frame.bin_id_max), fill=style.hud, font=hud_font)
+    draw.text((right - 96, axis_y), str(frame.bin_id_max), fill=style.hud, font=hud_font)
     draw.text(
-        (left + (right - left) / 2 - 88, axis_y),
+        (left + (right - left) / 2 - 130, axis_y),
         "BIN ID · GLOBAL LATTICE",
         fill=style.hud,
         font=hud_font,
@@ -539,12 +557,13 @@ def render_seismic_frame(
         f"{token_x}/{token_y} | {pool_address[:6]}...{pool_address[-4:]} | "
         f"SNAP {current.snapshot_index + 1}/{total_traces} | {current.fetched_label}"
     )
-    draw.text((left, 18), title, fill=style.hud, font=title_font)
-    draw.text((left, 44), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
+    draw.text((left, 22), title, fill=style.hud, font=title_font)
+    draw.text((left, 56), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
 
-    legend_x = right - 220
+    legend_x = right - 280
     legend_y = top + 8
     legend_font = channel_font
+    legend_line = int(CHANNEL_FONT_SIZE * 1.45)
     draw.text(
         (legend_x, legend_y),
         f"| {token_y} (Y)",
@@ -552,13 +571,13 @@ def render_seismic_frame(
         font=legend_font,
     )
     draw.text(
-        (legend_x, legend_y + 18),
+        (legend_x, legend_y + legend_line),
         f"| {token_x} (X)",
         fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 240),
         font=legend_font,
     )
     draw.text(
-        (legend_x, legend_y + 36),
+        (legend_x, legend_y + 2 * legend_line),
         f"| {token_x}+{token_y}",
         fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["mix"], layer_age=0), 240),
         font=legend_font,

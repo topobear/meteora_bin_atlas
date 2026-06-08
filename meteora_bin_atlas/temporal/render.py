@@ -13,6 +13,7 @@ from meteora_bin_atlas.explore.labels import parse_token_labels
 from meteora_bin_atlas.paths import DATA_PROCESSED, PLOTS_DIR
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series
 from meteora_bin_atlas.temporal.seismic import (
+    GHOST_HISTORY,
     GlobalFrame,
     compute_display_frame,
     encode_mp4,
@@ -98,6 +99,7 @@ def build_temporal_mp4(
 
     fade_fraction = 0.0 if one_frame_per_snapshot else 0.45
     display_frame: GlobalFrame | None = None
+    prior_rendered: list[int] = []
     for current_index in trace_indices:
         display_frame = compute_display_frame(
             traces,
@@ -105,6 +107,7 @@ def build_temporal_mp4(
             display_frame,
             atlas=atlas_frame,
         )
+        ghost_indices = prior_rendered[-GHOST_HISTORY:]
         fade_frames = 1 if one_frame_per_snapshot else max(1, int(round(frames_per_snapshot * fade_fraction)))
         for frame_i in range(frames_per_snapshot):
             if one_frame_per_snapshot or current_index == 0:
@@ -116,6 +119,7 @@ def build_temporal_mp4(
                 frame=display_frame,
                 current_index=current_index,
                 transition_blend=blend,
+                ghost_indices=ghost_indices,
                 zoom_bins=zoom_bins,
                 liquidity_scale=liquidity_scale,
                 token_x=token_x,
@@ -125,6 +129,7 @@ def build_temporal_mp4(
                 height=height,
             )
             frame_arrays.append(rgb)
+        prior_rendered.append(current_index)
 
     if output_path is None:
         PLOTS_DIR.mkdir(parents=True, exist_ok=True)

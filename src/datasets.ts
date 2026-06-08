@@ -7,6 +7,8 @@ export type DatasetId = (typeof DATASET_IDS)[number];
 
 export const DEFAULT_DATASET: DatasetId = "alchemy";
 
+export const ALCHEMY_DASHBOARD_URL = "https://dashboard.alchemy.com";
+
 export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
 
 /** Default temporal pacing: 2 Hz poll on Alchemy. */
@@ -45,6 +47,33 @@ function parseDatasetFlag(argv: string[]): DatasetId | undefined {
 
 export function getDatasetId(argv: string[] = process.argv): DatasetId {
   return parseDatasetFlag(argv) ?? DEFAULT_DATASET;
+}
+
+export function rpcHostFromUrl(rpcUrl: string): string {
+  try {
+    return new URL(rpcUrl).host;
+  } catch {
+    return "(invalid URL)";
+  }
+}
+
+export function inferDatasetForRpcUrl(rpcUrl: string): DatasetId {
+  const host = rpcHostFromUrl(rpcUrl).toLowerCase();
+  if (host.includes("alchemy.com")) {
+    return "alchemy";
+  }
+  if (host === "api.mainnet-beta.solana.com") {
+    return "solana-public";
+  }
+  return "alchemy";
+}
+
+export function logRpcSource(dataset: DatasetId, rpcUrl: string): void {
+  console.log(`Source: ${dataset} (${rpcHostFromUrl(rpcUrl)})`);
+}
+
+export function logRpcSourceFromUrl(rpcUrl: string): void {
+  logRpcSource(inferDatasetForRpcUrl(rpcUrl), rpcUrl);
 }
 
 export function resolveRpcDataset(dataset: DatasetId): RpcDatasetConfig {

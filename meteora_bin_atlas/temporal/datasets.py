@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 DATASET_IDS = ("alchemy", "solana-public", "simulated")
 DEFAULT_DATASET = "alchemy"
+ALCHEMY_DASHBOARD_URL = "https://dashboard.alchemy.com"
 SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com"
 
 # Default temporal pacing: 1 Hz poll on Alchemy (see FETCH_LATENCY_SEC).
@@ -33,6 +34,13 @@ def poll_interval_sec(poll_hz: float) -> float:
     if poll_hz <= 0:
         raise ValueError("poll_hz must be positive")
     return max(0.0, 1.0 / poll_hz - FETCH_LATENCY_SEC)
+
+
+def log_fetch_source(dataset: str, *, poll_hz: float = DEFAULT_POLL_HZ) -> RpcDatasetConfig:
+    """Resolve RPC config and print the data source."""
+    rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
+    print(f"Source: {dataset} ({rpc_dataset.rpc_host})")
+    return rpc_dataset
 
 
 def resolve_rpc_dataset(dataset: str, *, poll_hz: float = DEFAULT_POLL_HZ) -> RpcDatasetConfig:

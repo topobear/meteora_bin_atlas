@@ -15,8 +15,11 @@
 # Override pool:  make atlas POOL=<address>  (default: SOL-USDC)
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
-.PHONY: help install install-ts install-py smoke discover fetch-pool fetch-bins normalize-bins \
+.PHONY: help install install-ts install-py smoke alchemy-dashboard discover fetch-pool fetch-bins normalize-bins \
 	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal timelapse simulate-series render-mp4 render-mp4-demo atlas notebook
+
+# Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
+ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
 
 # Default pool: SOL-USDC from data/manual_pools.json
 POOL ?= 5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6
@@ -61,6 +64,7 @@ help:
 	@echo "  make install-ts       npm install"
 	@echo "  make install-py       poetry install"
 	@echo "  make smoke            Solana RPC smoke test"
+	@echo "  make alchemy-dashboard  open Alchemy dashboard (API key for DATASET=alchemy)"
 	@echo ""
 	@echo "Single snapshot (POOL=$(POOL))"
 	@echo "  make discover         discover pool candidates"
@@ -103,6 +107,11 @@ install-py:
 
 smoke:
 	npm run smoke
+
+alchemy-dashboard:
+	@echo "Alchemy dashboard — Apps → Solana Mainnet → API Key → SOLANA_RPC_URL in .env"
+	@echo "  $(ALCHEMY_DASHBOARD_URL)"
+	@open $(ALCHEMY_DASHBOARD_URL) 2>/dev/null || xdg-open $(ALCHEMY_DASHBOARD_URL) 2>/dev/null || true
 
 # --- Single-snapshot pipeline -------------------------------------------------
 
