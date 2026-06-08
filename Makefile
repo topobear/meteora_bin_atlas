@@ -70,7 +70,7 @@ help:
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
 	@echo "Temporal (default pool: SOL-USDC)"
-	@echo "  make temporal           240 snaps @ 2Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
+	@echo "  make temporal           240 snaps @ 1Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
 	@echo "  make poll-snapshots     OHLCV + snapshot series + series CSV only"
 	@echo "  make fetch-ohlcv        price candles only"
 	@echo "  make fetch-series       bounded snapshot series only"
@@ -79,7 +79,7 @@ help:
 	@echo "  make simulate-series    synthetic series from real seed (no RPC; for long MP4s)"
 	@echo "  make render-mp4-demo    simulate-series + render-mp4 (~60s default)"
 	@echo ""
-	@echo "Temporal knobs: DATASET, TEMPORAL_COUNT (240), TEMPORAL_POLL_HZ (2),"
+	@echo "Temporal knobs: DATASET, TEMPORAL_COUNT (240), TEMPORAL_POLL_HZ (1),"
 	@echo "  TEMPORAL_FPS (24), TEMPORAL_DURATION_SEC (10), SERIES_BINS_LEFT/RIGHT"
 	@echo "Poll knobs: OHLCV_TIMEFRAME, OHLCV_LOOKBACK_DAYS,"
 	@echo "  FRAME_DURATION, MP4_FPS (for render-mp4), SIM_COUNT, SIM_INTERVAL_SEC,"
@@ -124,12 +124,12 @@ atlas: discover fetch-pool fetch-bins normalize-bins
 
 # --- Temporal (make temporal) -----------------------------------------------
 
-# Poll 240 snapshots @ 2 Hz (~2 min), render 1 snap = 1 frame → 10s MP4 at 24 fps.
+# Poll 240 snapshots @ 1 Hz (~4 min), render 1 snap = 1 frame → 10s MP4 at 24 fps.
 DATASET ?= alchemy
 TEMPORAL_DURATION_SEC ?= 10
 TEMPORAL_FPS ?= 24
 TEMPORAL_COUNT ?= 240
-TEMPORAL_POLL_HZ ?= 2
+TEMPORAL_POLL_HZ ?= 1
 TEMPORAL_ARGS = --pool $(POOL) --dataset $(DATASET) \
 	--duration-sec $(TEMPORAL_DURATION_SEC) --fps $(TEMPORAL_FPS) --count $(TEMPORAL_COUNT) \
 	--poll-hz $(TEMPORAL_POLL_HZ)

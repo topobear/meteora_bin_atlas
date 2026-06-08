@@ -149,7 +149,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "End-to-end temporal pipeline: fetch or simulate bin-atlas series, "
-            "then render MP4 (default: 240 snaps @ 2 Hz → 10s at 24 fps, 1 snap = 1 frame)."
+            "then render MP4 (default: 240 snaps @ 1 Hz → 10s at 24 fps, 1 snap = 1 frame)."
         ),
     )
     parser.add_argument(
