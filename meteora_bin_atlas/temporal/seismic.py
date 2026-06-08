@@ -465,30 +465,32 @@ def _draw_active_bin_marker(
     plot_box: tuple[int, int, int, int],
     style: SeismicStyle,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    label_y: int | None = None,
 ) -> float:
     left, top, right, bottom = plot_box
     cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
-    # Draw at the active bin's true data position so the marker always sits on the
-    # active liquidity column (never force-snapped to plot center, which detaches it).
     active_x = round(
         _x_center_for_bin_id(active_bin_id, frame=frame, plot_left=left, cell_w=cell_w)
     )
     half = max(4.0, cell_w / 2.0)
-    # Thick translucent band spanning the active bin cell — the "spanning" bar that is
-    # always present, regardless of whether the active bin happens to hold both tokens.
-    draw.rectangle([active_x - half, top, active_x + half, bottom], fill=(255, 255, 255, 80))
-    # Crisp center line with a dark backing so it stays visible over bright fills.
-    draw.line([(active_x, top), (active_x, bottom)], fill=(0, 0, 0, 150), width=5)
-    draw.line([(active_x, top), (active_x, bottom)], fill=style.active_bin, width=3)
+    pole_top = label_y if label_y is not None else top
+    draw.rectangle([active_x - half, pole_top, active_x + half, bottom], fill=(255, 255, 255, 80))
+    draw.line([(active_x, pole_top), (active_x, bottom)], fill=(0, 0, 0, 150), width=5)
+    draw.line([(active_x, pole_top), (active_x, bottom)], fill=style.active_bin, width=3)
     tick = 8
-    draw.line([(active_x - tick, top), (active_x + tick, top)], fill=style.active_bin, width=3)
+    draw.line([(active_x - tick, pole_top), (active_x + tick, pole_top)], fill=style.active_bin, width=3)
     draw.line([(active_x - tick, bottom), (active_x + tick, bottom)], fill=style.active_bin, width=3)
-    draw.text(
-        (active_x + 6, top + 4),
-        f"ACTIVE {active_bin_id}",
-        fill=style.hud,
-        font=font,
+    label = f"ACTIVE {active_bin_id}"
+    tx = active_x + 6
+    ty = label_y if label_y is not None else top + 4
+    bbox = font.getbbox(label)
+    pad_x, pad_y = 5, 3
+    draw.rectangle(
+        [tx + bbox[0] - pad_x, ty + bbox[1] - pad_y,
+         tx + bbox[2] + pad_x, ty + bbox[3] + pad_y],
+        fill=(200, 90, 0, 230),
     )
+    draw.text((tx, ty), label, fill=(255, 255, 255, 255), font=font)
     return active_x
 
 
@@ -766,6 +768,9 @@ def render_seismic_frame(
             font=channel_font,
         )
 
+    legend_x = right - 230
+    legend_y = top + 26
+
     current = traces[current_index]
     _draw_active_bin_marker(
         draw,
@@ -774,6 +779,7 @@ def render_seismic_frame(
         plot_box=plot_box,
         style=style,
         font=hud_font,
+        label_y=legend_y,
     )
 
     axis_y = height - 62
@@ -794,8 +800,6 @@ def render_seismic_frame(
     draw.text((left, 13), title, fill=style.hud, font=title_font)
     draw.text((left, 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
 
-    legend_x = right - 230
-    legend_y = top + 6
     legend_font = channel_font
     legend_line = int(CHANNEL_FONT_SIZE * 1.3)
     draw.text(
