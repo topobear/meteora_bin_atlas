@@ -15,7 +15,7 @@ from meteora_bin_atlas.explore.labels import bar_color_for_bin
 
 # Skyline rises from the plot floor; this fraction caps peak height below the top margin.
 CURRENT_DEFLECTION_RATIO = 0.86
-GHOST_HISTORY = 10
+GHOST_HISTORY = 12
 ROLLING_SNAPSHOTS = 5
 DISPLAY_PAD_BINS = 4
 ZOOM_IN_RATIO = 0.72
@@ -23,13 +23,15 @@ MIN_DISPLAY_BINS = 25
 # Active bin must stay at least this many bins away from the viewport edge
 # before the window scrolls.  Gives a natural left/right float within the plot.
 VIEWPORT_EDGE_BAND = 10
-CURRENT_FILL_ALPHA = 28
-CURRENT_OUTLINE_ALPHA = 220
-GHOST_FILL_BASE = 18
-GHOST_FILL_DECAY = 0.55
-GHOST_OUTLINE_BASE = 160
-GHOST_OUTLINE_DECAY = 0.68
-GHOST_FILL_CUTOFF_AGE = 6
+CURRENT_FILL_ALPHA = 110     # NOW frame: solidly colored so there is color to fade from
+CURRENT_OUTLINE_ALPHA = 230
+# Colored ghost fills fade GRADUALLY over the full history so the trail is a
+# visible "comet" of the distribution's recent color, decaying toward black.
+GHOST_FILL_BASE = 110        # age-1 starts at NOW level, then decays
+GHOST_FILL_DECAY = 0.78      # 110→86→67→52→41→32→25→19→15→12→9 across ages 1-11
+GHOST_OUTLINE_BASE = 140
+GHOST_OUTLINE_DECAY = 0.74   # gentle outline fade tracking the fill
+GHOST_FILL_CUTOFF_AGE = 99   # no hard cutoff — let the gradual decay run the whole trail
 GHOST_TRACE_Y_OFFSET = 3.0
 GHOST_TRACE_X_DRIFT = 0.35
 
@@ -339,7 +341,9 @@ def _layer_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
     if layer_age <= 0:
         return rgb
     bg = SeismicStyle.background
-    mute = 0.45**layer_age
+    # Gentle hue dimming; the alpha decay in _ghost_alphas carries most of the
+    # fade so the color stays recognisable (e.g. dim cyan) along the trail.
+    mute = 0.88**layer_age
     return tuple(int(bg[i] + (rgb[i] - bg[i]) * mute) for i in range(3))
 
 
