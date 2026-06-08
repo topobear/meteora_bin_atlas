@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { config } from "../config.js";
+import { logRpcSourceFromUrl } from "../datasets.js";
 import { formatTimestampForFilename } from "../meteora/discoverPools.js";
 import { fetchBinArrays } from "../meteora/fetchBinArrays.js";
 import { writeJson } from "../io/writeJson.js";
@@ -49,6 +51,7 @@ function getBoundedOptions(): { left: number; right: number } | undefined {
 async function main(): Promise<void> {
   const poolAddress = getPoolAddress();
   const bounded = getBoundedOptions();
+  logRpcSourceFromUrl(config.SOLANA_RPC_URL);
   const connection = getConnection();
   const timestamp = formatTimestampForFilename();
   const fileStem = `bin_arrays_${poolAddress}_${timestamp}`;

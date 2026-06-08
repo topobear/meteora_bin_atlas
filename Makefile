@@ -15,7 +15,7 @@
 # Override pool:  make atlas POOL=<address>  (default: SOL-USDC)
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
-.PHONY: help install install-ts install-py smoke alchemy-dashboard discover fetch-pool fetch-bins normalize-bins \
+.PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data discover fetch-pool fetch-bins normalize-bins \
 	fetch-ohlcv fetch-series normalize-series poll-snapshots temporal timelapse simulate-series render-mp4 render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
@@ -65,6 +65,7 @@ help:
 	@echo "  make install-py       poetry install"
 	@echo "  make smoke            Solana RPC smoke test"
 	@echo "  make alchemy-dashboard  open Alchemy dashboard (API key for DATASET=alchemy)"
+	@echo "  make clear-data         remove fetched artifacts in data/raw and data/processed"
 	@echo ""
 	@echo "Single snapshot (POOL=$(POOL))"
 	@echo "  make discover         discover pool candidates"
@@ -112,6 +113,12 @@ alchemy-dashboard:
 	@echo "Alchemy dashboard — Apps → Solana Mainnet → API Key → SOLANA_RPC_URL in .env"
 	@echo "  $(ALCHEMY_DASHBOARD_URL)"
 	@open $(ALCHEMY_DASHBOARD_URL) 2>/dev/null || xdg-open $(ALCHEMY_DASHBOARD_URL) 2>/dev/null || true
+
+# Delete fetched JSON/CSV; keeps .gitkeep and data/manual_pools.json. Does not touch plots/.
+clear-data:
+	@echo "Clearing data/raw and data/processed..."
+	@find data/raw data/processed -type f ! -name '.gitkeep' -delete
+	@echo "Done."
 
 # --- Single-snapshot pipeline -------------------------------------------------
 

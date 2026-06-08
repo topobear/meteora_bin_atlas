@@ -12,7 +12,6 @@ from meteora_bin_atlas.temporal.datasets import (
     DATASET_IDS,
     DEFAULT_DATASET,
     DEFAULT_POLL_HZ,
-    log_fetch_source,
     poll_interval_sec,
 )
 from meteora_bin_atlas.temporal.render import build_temporal_mp4
@@ -74,7 +73,6 @@ def run_timelapse(
             processed_dir=project_root / "data" / "processed",
         )
     else:
-        log_fetch_source(dataset, poll_hz=poll_hz)
         _fetch_live_series(
             pool_address=pool_address,
             dataset=dataset,

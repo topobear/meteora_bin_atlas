@@ -15,8 +15,8 @@ from meteora_bin_atlas.temporal.datasets import (
     DATASET_IDS,
     DEFAULT_DATASET,
     DEFAULT_POLL_HZ,
-    log_fetch_source,
     poll_interval_sec,
+    resolve_rpc_dataset,
 )
 from meteora_bin_atlas.temporal.render import build_temporal_mp4
 from meteora_bin_atlas.temporal.simulate import build_simulated_series
@@ -45,7 +45,7 @@ def _fetch_live_series(
     bins_right: int,
     project_root: Path,
 ) -> None:
-    rpc_dataset = log_fetch_source(dataset)
+    rpc_dataset = resolve_rpc_dataset(dataset)
     env = os.environ.copy()
     env["SOLANA_RPC_URL"] = rpc_dataset.rpc_url
 
@@ -124,7 +124,6 @@ def run_temporal(
             processed_dir=project_root / "data" / "processed",
         )
     else:
-        log_fetch_source(dataset, poll_hz=poll_hz)
         _fetch_live_series(
             pool_address=pool_address,
             dataset=dataset,

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   type DatasetId,
   getDatasetId,
+  logRpcSource,
   resolveRpcDataset,
 } from "../datasets.js";
 import { formatTimestampForFilename } from "../meteora/discoverPools.js";
@@ -86,10 +87,6 @@ function getTimeframe(): OhlcvTimeframe {
   return value as OhlcvTimeframe;
 }
 
-function rpcHostFromUrl(rpcUrl: string): string {
-  return new URL(rpcUrl).host;
-}
-
 function exitOnRpcDatasetError(error: unknown, dataset: DatasetId): never {
   const message =
     error instanceof RpcDatasetAbortError
@@ -129,8 +126,8 @@ async function main(): Promise<void> {
   const runTimestamp = formatTimestampForFilename();
 
   console.log(`Temporal sample for pool ${poolAddress}`);
-  console.log(`  Dataset: ${dataset} (${rpcHostFromUrl(rpcDataset.rpcUrl)})`);
-  console.log(`  OHLCV: ${lookbackDays}d ${timeframe} candles (Meteora datapi)`);
+  logRpcSource(dataset, rpcDataset.rpcUrl);
+  console.log(`  OHLCV: ${lookbackDays}d ${timeframe} candles`);
   console.log(
     `  Series: ${count} bounded snapshots (${binsLeft}/${binsRight} bins), ` +
       `${pauseSec}s between snapshots (RPC backoff ${rpcBackoffSec}s, then interval ${intervalSec}s, ~${wallMin} min)`,

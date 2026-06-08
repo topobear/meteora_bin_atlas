@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { getDatasetId, logRpcSource, resolveRpcDataset } from "../datasets.js";
 import { formatTimestampForFilename } from "../meteora/discoverPools.js";
 import { fetchSnapshotSeries } from "../meteora/fetchSnapshotSeries.js";
 import { writeJson } from "../io/writeJson.js";
@@ -85,7 +86,10 @@ async function main(): Promise<void> {
   const intervalSec = getIntervalSec();
   const rpcBackoffSec = getRpcBackoffSec();
   const bounded = getBoundedOptions();
-  const connection = getConnection();
+  const dataset = getDatasetId();
+  const rpcDataset = resolveRpcDataset(dataset);
+  logRpcSource(dataset, rpcDataset.rpcUrl);
+  const connection = getConnection(rpcDataset.rpcUrl);
   const timestamp = formatTimestampForFilename();
   const fileStem = `snapshot_series_${poolAddress}_${timestamp}`;
   const rawPath = path.join(process.cwd(), "data", "raw", `${fileStem}.json`);
@@ -104,6 +108,7 @@ async function main(): Promise<void> {
     intervalSec,
     rpcBackoffSec,
     projectRoot: process.cwd(),
+    dataset,
     bounded,
   });
 

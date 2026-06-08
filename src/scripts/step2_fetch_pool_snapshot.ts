@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { config } from "../config.js";
+import { logRpcSourceFromUrl } from "../datasets.js";
 import { formatTimestampForFilename } from "../meteora/discoverPools.js";
 import { fetchPoolState } from "../meteora/fetchPoolState.js";
 import { writeJson } from "../io/writeJson.js";
@@ -24,6 +26,7 @@ function getPoolAddress(): string {
 
 async function main(): Promise<void> {
   const poolAddress = getPoolAddress();
+  logRpcSourceFromUrl(config.SOLANA_RPC_URL);
   const connection = getConnection();
   const timestamp = formatTimestampForFilename();
   const fileStem = `pool_snapshot_${poolAddress}_${timestamp}`;
