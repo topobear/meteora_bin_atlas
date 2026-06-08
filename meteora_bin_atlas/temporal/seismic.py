@@ -35,6 +35,23 @@ GHOST_FILL_CUTOFF_AGE = 99   # no hard cutoff — let the gradual decay run the 
 GHOST_TRACE_Y_OFFSET = 3.0
 GHOST_TRACE_X_DRIFT = 0.35
 
+# Sideways drift seismograph in the far-left margin: time runs top→bottom,
+# horizontal deflection = active bin's drift left/right from its series centre.
+DRIFT_STRIP_LEFT = 26
+DRIFT_STRIP_RIGHT = 116
+DRIFT_STRIP_EDGE_PAD = 4.0
+# Centre baseline for the drift strip = trailing rolling mean of the active bin.
+DRIFT_ROLLING_WINDOW = 20
+# Rekordbox-style scrolling: NOW is pinned at the bottom and history scrolls up
+# off the top.  The visible window is sized in seconds of video; the renderer
+# converts it to a snapshot count from the active fps (fallback used directly
+# when no explicit window is supplied).
+DRIFT_WINDOW_SECONDS = 5.0
+DRIFT_WINDOW = 120
+# Auto-rescale headroom: peak deflection maps to (half-width / headroom), so the
+# trace zooms out horizontally as drift grows and always keeps a width margin.
+DRIFT_HEADROOM = 1.18
+
 # Neon instrument palette for temporal MP4 (notebook TOKEN_COLORS unchanged).
 SEISMIC_TOKEN_COLORS = {
     "X": "#FF2BD6",
@@ -389,6 +406,13 @@ def _layer_style(layer_age: int, transition_blend: float) -> LayerStyle:
     )
 
 
+def _nice_step(raw: int, candidates: tuple[int, ...]) -> int:
+    for nice in candidates:
+        if nice >= raw:
+            return nice
+    return max(1, raw)
+
+
 def _draw_grid(
     draw: ImageDraw.ImageDraw,
     *,
@@ -396,32 +420,39 @@ def _draw_grid(
     plot_box: tuple[int, int, int, int],
     trace_y: float,
     style: SeismicStyle,
+    label_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> None:
     left, top, right, bottom = plot_box
     cell_w = _bin_cell_width(frame=frame, plot_left=left, plot_right=right)
 
     # Adaptive grid step: target ~15 gridlines across the plot.
     # Snap to a "nice" interval (2, 5, 10, 20 …) so lines always land on round bin ids.
-    raw_step = max(1, frame.n_bins // 15)
-    for nice in (2, 5, 10, 20, 50, 100):
-        if nice >= raw_step:
-            grid_step = nice
-            break
-    else:
-        grid_step = raw_step
-
-    # Align first line to a multiple of grid_step so labels feel anchored.
-    first = (
-        (frame.bin_id_min // grid_step) * grid_step
-        if frame.bin_id_min >= 0
-        else -((-frame.bin_id_min + grid_step - 1) // grid_step) * grid_step
+    grid_step = _nice_step(max(1, frame.n_bins // 15), (2, 5, 10, 20, 50, 100))
+    # Coarser labelled step (~6 labels) so the axis reads round bin ids.
+    label_step = _nice_step(
+        max(grid_step, frame.n_bins // 6),
+        (10, 20, 25, 50, 100, 200, 250, 500, 1000),
     )
-    bin_id = first
+
+    def aligned_first(step: int) -> int:
+        if frame.bin_id_min >= 0:
+            return (frame.bin_id_min // step) * step
+        return -((-frame.bin_id_min + step - 1) // step) * step
+
+    bin_id = aligned_first(grid_step)
     while bin_id <= frame.bin_id_max:
         if bin_id >= frame.bin_id_min:
             x = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=left, cell_w=cell_w)
             draw.line([(x, top), (x, bottom)], fill=style.grid_major, width=1)
         bin_id += grid_step
+
+    # Faint gray bin-id labels on the coarse gridlines.
+    bin_id = aligned_first(label_step)
+    while bin_id <= frame.bin_id_max:
+        if bin_id >= frame.bin_id_min:
+            x = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=left, cell_w=cell_w)
+            draw.text((x + 3, top + 4), str(bin_id), fill=(150, 165, 180, 150), font=label_font)
+        bin_id += label_step
 
     draw.line([(left, trace_y), (right, trace_y)], fill=style.baseline, width=1)
 
@@ -554,6 +585,102 @@ def _resolve_ghost_layers(
     return layers
 
 
+def _draw_drift_seismograph(
+    draw: ImageDraw.ImageDraw,
+    *,
+    traces: list[SnapshotTrace],
+    current_index: int,
+    plot_box: tuple[int, int, int, int],
+    style: SeismicStyle,
+    window: int = DRIFT_WINDOW,
+) -> None:
+    """Vertical sparkline of active-bin drift (left/right) from the series centre.
+
+    Time runs top (oldest) → bottom (newest). The trace is drawn up to the
+    current snapshot; horizontal deflection from the centre line encodes how far
+    the active bin has drifted, auto-rescaled to fill the strip width.
+    """
+    if not traces:
+        return
+
+    _, top, _, bottom = plot_box
+    strip_cx = (DRIFT_STRIP_LEFT + DRIFT_STRIP_RIGHT) / 2.0
+    half_w = (DRIFT_STRIP_RIGHT - DRIFT_STRIP_LEFT) / 2.0 - DRIFT_STRIP_EDGE_PAD
+
+    active_ids = np.array([t.active_bin_id for t in traces], dtype=np.float64)
+    # Trailing rolling-mean centre: each sample's drift is measured against the
+    # average active bin over the preceding DRIFT_ROLLING_WINDOW snapshots, so the
+    # strip highlights deviation from the recent trend rather than a fixed centre.
+    rolling_centre = (
+        pd.Series(active_ids)
+        .rolling(window=DRIFT_ROLLING_WINDOW, min_periods=1)
+        .mean()
+        .to_numpy()
+    )
+    drift = active_ids - rolling_centre
+    # Headroom keeps the widest swing off the edge; as drift grows the whole
+    # trace zooms out horizontally to stay inside the strip with a margin.
+    max_abs = float(np.max(np.abs(drift))) * DRIFT_HEADROOM
+    if max_abs <= 0:
+        max_abs = 1.0
+
+    total = len(traces)
+    n = max(0, min(current_index, total - 1))
+
+    # Scrolling time window: NOW sits at the bottom; the most recent `window`
+    # snapshots fill the strip and older ones scroll off the top.
+    window = max(2, window)
+    win_lo = n - (window - 1)
+    first = max(0, win_lo)
+
+    def y_for(i: int) -> float:
+        frac = (i - win_lo) / (window - 1)
+        return top + frac * (bottom - top)
+
+    def x_for(i: int) -> float:
+        return strip_cx + (drift[i] / max_abs) * half_w
+
+    # Panel + centre baseline (drift = 0).
+    draw.rectangle(
+        [DRIFT_STRIP_LEFT - 3, top, DRIFT_STRIP_RIGHT + 3, bottom],
+        fill=(6, 10, 14, 130),
+        outline=(*style.hud[:3], 45),
+    )
+    draw.line([(strip_cx, top), (strip_cx, bottom)], fill=(*style.baseline[:3], 130), width=1)
+    # Match the histogram orientation: lower bin ids sit on the LEFT and hold Y
+    # (cyan); higher bin ids sit on the RIGHT and hold X (magenta).  A leftward
+    # drift means the active bin dropped to a lower id, so colour it cyan.
+    left_color = _hex_to_rgb(SEISMIC_TOKEN_COLORS["Y"])   # drift left of centre
+    right_color = _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"])  # drift right of centre
+
+    # Filled horizontal deflections from the centre line — the "seismic" body.
+    for i in range(first, n):
+        y0, y1 = y_for(i), y_for(i + 1)
+        x0, x1 = x_for(i), x_for(i + 1)
+        side = drift[i] + drift[i + 1]
+        col = left_color if side < 0 else right_color
+        draw.polygon(
+            [(strip_cx, y0), (x0, y0), (x1, y1), (strip_cx, y1)],
+            fill=(*col, 70),
+        )
+
+    # Bright trace line over the fill.
+    points = [(x_for(i), y_for(i)) for i in range(first, n + 1)]
+    if len(points) >= 2:
+        draw.line(points, fill=(*_TRACE_OUTLINE_BASE, 225), width=2, joint="curve")
+
+    # NOW marker pinned at the bottom: gridline + dot at the latest sample.
+    nx, ny = x_for(n), y_for(n)
+    draw.line([(DRIFT_STRIP_LEFT, ny), (DRIFT_STRIP_RIGHT, ny)], fill=(255, 255, 255, 70), width=1)
+    draw.ellipse([nx - 4, ny - 4, nx + 4, ny + 4], fill=(255, 255, 255, 255))
+
+    # Stronger, bold all-caps DRIFT header (double-struck for weight).
+    label_font = _load_mono_font(26)
+    label_xy = (DRIFT_STRIP_LEFT - 2, top - 32)
+    for dx in (0, 1):
+        draw.text((label_xy[0] + dx, label_xy[1]), "DRIFT", fill=(235, 246, 255, 255), font=label_font)
+
+
 def render_seismic_frame(
     traces: list[SnapshotTrace],
     *,
@@ -563,6 +690,7 @@ def render_seismic_frame(
     ghost_indices: list[int] | None = None,
     zoom_bins: int | None = None,
     liquidity_scale: float,
+    drift_window: int = DRIFT_WINDOW,
     token_x: str,
     token_y: str,
     pool_address: str,
@@ -576,7 +704,7 @@ def render_seismic_frame(
     total_traces = len(traces)
 
     img = Image.new("RGBA", (width, height), style.background + (255,))
-    plot_box = (120, 100, width - 30, height - 100)
+    plot_box = (176, 100, width - 30, height - 100)
     left, top, right, bottom = plot_box
     plot_bg = Image.fromarray(_plot_background(right - left, bottom - top), mode="RGB")
     img.paste(plot_bg, (left, top))
@@ -587,8 +715,16 @@ def render_seismic_frame(
     hud_font = _load_mono_font(HUD_FONT_SIZE)
     channel_font = _load_mono_font(CHANNEL_FONT_SIZE)
 
+    grid_label_font = _load_mono_font(15)
     trace_y = float(bottom)
-    _draw_grid(draw, frame=frame, plot_box=plot_box, trace_y=trace_y, style=style)
+    _draw_grid(
+        draw,
+        frame=frame,
+        plot_box=plot_box,
+        trace_y=trace_y,
+        style=style,
+        label_font=grid_label_font,
+    )
 
     max_deflection = (bottom - top) * CURRENT_DEFLECTION_RATIO
     ghost_layers = _resolve_ghost_layers(current_index, ghost_indices)
@@ -609,7 +745,16 @@ def render_seismic_frame(
             layer_age=layer_age,
         )
 
-    channel_x = left - 118
+    _draw_drift_seismograph(
+        draw,
+        traces=traces,
+        current_index=current_index,
+        plot_box=plot_box,
+        style=style,
+        window=drift_window,
+    )
+
+    channel_x = DRIFT_STRIP_RIGHT + 8
     for layer_index, layer_age in ghost_layers:
         layer_trace_y = trace_y - layer_age * GHOST_TRACE_Y_OFFSET
         label = "NOW" if layer_age == 0 else f"T-{layer_age}"

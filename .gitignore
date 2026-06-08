@@ -224,3 +224,6 @@ dist/
 
 # Data folder
 data/
+
+# Plots folder
+plots/

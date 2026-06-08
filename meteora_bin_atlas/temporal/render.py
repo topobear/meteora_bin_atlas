@@ -13,6 +13,7 @@ from meteora_bin_atlas.explore.labels import parse_token_labels
 from meteora_bin_atlas.paths import DATA_PROCESSED, DATA_SIMULATED, PLOTS_DIR
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series, load_simulated_bin_atlas_series
 from meteora_bin_atlas.temporal.seismic import (
+    DRIFT_WINDOW_SECONDS,
     GHOST_HISTORY,
     GlobalFrame,
     compute_display_frame,
@@ -104,6 +105,15 @@ def build_temporal_mp4(
         frames_per_snapshot = max(1, int(round(frame_duration_sec * fps)))
     frame_arrays: list = []
 
+    # Drift strip scrolls over a fixed wall-clock window. Convert seconds of
+    # video into a snapshot count via how fast the snapshot index advances per
+    # second of playback (handles holds and timelapse subsampling alike).
+    total_rendered_frames = len(trace_indices) * frames_per_snapshot
+    video_duration_sec = max(1e-6, total_rendered_frames / fps)
+    index_span = max(1, trace_indices[-1] - trace_indices[0])
+    snapshots_per_video_sec = index_span / video_duration_sec
+    drift_window = max(2, int(round(DRIFT_WINDOW_SECONDS * snapshots_per_video_sec)))
+
     fade_fraction = 0.0 if one_frame_per_snapshot else 0.45
     display_frame: GlobalFrame | None = None
     prior_rendered: list[int] = []
@@ -129,6 +139,7 @@ def build_temporal_mp4(
                 ghost_indices=ghost_indices,
                 zoom_bins=zoom_bins,
                 liquidity_scale=liquidity_scale,
+                drift_window=drift_window,
                 token_x=token_x,
                 token_y=token_y,
                 pool_address=pool_address,
