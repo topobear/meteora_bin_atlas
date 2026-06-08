@@ -42,6 +42,7 @@ def build_temporal_mp4(
     series_csv: Path | None = None,
     frame_duration_sec: float = 1.0,
     fps: int = 10,
+    one_frame_per_snapshot: bool = False,
     zoom_bins: int = 30,
     processed_dir: Path = DATA_PROCESSED,
     dpi: int = 150,
@@ -71,10 +72,13 @@ def build_temporal_mp4(
 
     width = int(14 * dpi)
     height = int(8 * dpi)
-    frames_per_snapshot = max(1, int(round(frame_duration_sec * fps)))
+    if one_frame_per_snapshot:
+        frames_per_snapshot = 1
+    else:
+        frames_per_snapshot = max(1, int(round(frame_duration_sec * fps)))
     frame_arrays: list = []
 
-    fade_fraction = 0.45
+    fade_fraction = 0.0 if one_frame_per_snapshot else 0.45
     display_frame: GlobalFrame | None = None
     for current_index in range(len(traces)):
         display_frame = compute_display_frame(
@@ -83,9 +87,9 @@ def build_temporal_mp4(
             display_frame,
             atlas=atlas_frame,
         )
-        fade_frames = max(1, int(round(frames_per_snapshot * fade_fraction)))
+        fade_frames = 1 if one_frame_per_snapshot else max(1, int(round(frames_per_snapshot * fade_fraction)))
         for frame_i in range(frames_per_snapshot):
-            if current_index == 0:
+            if one_frame_per_snapshot or current_index == 0:
                 blend = 1.0
             else:
                 blend = min(1.0, (frame_i + 1) / fade_frames)
@@ -114,11 +118,17 @@ def build_temporal_mp4(
 
     duration_sec = len(frame_arrays) / fps
     print(f"Wrote {output_path}")
-    print(
-        f"  {len(traces)} snapshots × {frames_per_snapshot} frames "
-        f"({frame_duration_sec}s each) → {len(frame_arrays)} frames, "
-        f"{fps} fps, {duration_sec:.1f}s total"
-    )
+    if one_frame_per_snapshot:
+        print(
+            f"  {len(traces)} snapshots × 1 frame (1 snap = 1 frame) "
+            f"→ {len(frame_arrays)} frames, {fps} fps, {duration_sec:.1f}s total"
+        )
+    else:
+        print(
+            f"  {len(traces)} snapshots × {frames_per_snapshot} frames "
+            f"({frame_duration_sec}s each) → {len(frame_arrays)} frames, "
+            f"{fps} fps, {duration_sec:.1f}s total"
+        )
     return output_path
 
 
@@ -159,6 +169,11 @@ def _parse_args() -> argparse.Namespace:
         help="Video framerate (default: 10). Requires ffmpeg on PATH.",
     )
     parser.add_argument(
+        "--one-frame-per-snapshot",
+        action="store_true",
+        help="Render exactly one video frame per snapshot (no hold/fade).",
+    )
+    parser.add_argument(
         "--zoom-bins",
         type=int,
         default=30,
@@ -181,6 +196,7 @@ def main() -> None:
         series_csv=args.series_csv,
         frame_duration_sec=args.frame_duration,
         fps=args.fps,
+        one_frame_per_snapshot=args.one_frame_per_snapshot,
         zoom_bins=args.zoom_bins,
         dpi=args.dpi,
     )

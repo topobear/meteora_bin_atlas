@@ -11,23 +11,27 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from meteora_bin_atlas.config import DEFAULT_POOL_ADDRESS, get_pool_address
-from meteora_bin_atlas.temporal.datasets import DATASET_IDS, DEFAULT_DATASET, resolve_rpc_dataset
+from meteora_bin_atlas.temporal.datasets import (
+    DATASET_IDS,
+    DEFAULT_DATASET,
+    DEFAULT_POLL_HZ,
+    poll_interval_sec,
+    resolve_rpc_dataset,
+)
 from meteora_bin_atlas.temporal.render import build_temporal_mp4
 from meteora_bin_atlas.temporal.simulate import build_simulated_series
 
 DEFAULT_DURATION_SEC = 10.0
 DEFAULT_FPS = 24
-DEFAULT_SNAPSHOT_COUNT = 10
+DEFAULT_SNAPSHOT_COUNT = 240
 
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _frame_duration(duration_sec: float, snapshot_count: int) -> float:
-    if snapshot_count <= 0:
-        raise ValueError("snapshot count must be positive")
-    return duration_sec / snapshot_count
+def _expected_snapshot_count(duration_sec: float, fps: int) -> int:
+    return int(round(duration_sec * fps))
 
 
 def _fetch_live_series(
@@ -35,8 +39,8 @@ def _fetch_live_series(
     pool_address: str,
     dataset: str,
     snapshot_count: int,
-    rpc_backoff_sec: int,
-    interval_sec: int,
+    rpc_backoff_sec: float,
+    interval_sec: float,
     bins_left: int,
     bins_right: int,
     project_root: Path,
@@ -79,6 +83,7 @@ def run_temporal(
     duration_sec: float = DEFAULT_DURATION_SEC,
     fps: int = DEFAULT_FPS,
     snapshot_count: int = DEFAULT_SNAPSHOT_COUNT,
+    poll_hz: float = DEFAULT_POLL_HZ,
     bins_left: int = 30,
     bins_right: int = 30,
     output_path: Path | None = None,
@@ -88,12 +93,23 @@ def run_temporal(
     load_dotenv()
     pool_address = pool_address or get_pool_address()
     project_root = project_root or _project_root()
-    frame_duration = _frame_duration(duration_sec, snapshot_count)
+
+    expected = _expected_snapshot_count(duration_sec, fps)
+    if snapshot_count != expected:
+        print(
+            f"WARNING: {snapshot_count} snapshots at {fps} fps → "
+            f"{snapshot_count / fps:.1f}s video (expected {expected} for {duration_sec:.0f}s)."
+        )
+
+    interval_sec = poll_interval_sec(poll_hz)
+    poll_wall_sec = snapshot_count / poll_hz
 
     print(
-        f"Temporal run: pool={pool_address} dataset={dataset} "
-        f"{snapshot_count} snapshots → {duration_sec:.0f}s MP4 at {fps} fps "
-        f"({frame_duration:.2f}s per snapshot)"
+        f"Temporal run: pool={pool_address} dataset={dataset}\n"
+        f"  Poll: {snapshot_count} snapshots @ {poll_hz:g} Hz "
+        f"(interval {interval_sec:.2f}s, ~{poll_wall_sec:.0f}s wall time)\n"
+        f"  Render: 1 snap = 1 frame → {duration_sec:.0f}s MP4 at {fps} fps "
+        f"({snapshot_count} frames)"
     )
     print("")
 
@@ -103,11 +119,11 @@ def run_temporal(
         _, series_csv = build_simulated_series(
             pool_address,
             snapshot_count=snapshot_count,
-            interval_sec=frame_duration,
+            interval_sec=interval_sec,
             processed_dir=project_root / "data" / "processed",
         )
     else:
-        rpc_dataset = resolve_rpc_dataset(dataset)
+        rpc_dataset = resolve_rpc_dataset(dataset, poll_hz=poll_hz)
         _fetch_live_series(
             pool_address=pool_address,
             dataset=dataset,
@@ -123,8 +139,8 @@ def run_temporal(
         pool_address,
         output_path=output_path,
         series_csv=series_csv,
-        frame_duration_sec=frame_duration,
         fps=fps,
+        one_frame_per_snapshot=True,
         processed_dir=project_root / "data" / "processed",
     )
 
@@ -133,7 +149,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "End-to-end temporal pipeline: fetch or simulate bin-atlas series, "
-            "then render MP4 (default 10s at 24 fps)."
+            "then render MP4 (default: 240 snaps @ 2 Hz → 10s at 24 fps, 1 snap = 1 frame)."
         ),
     )
     parser.add_argument(
@@ -166,7 +182,13 @@ def _parse_args() -> argparse.Namespace:
         "--count",
         type=int,
         default=DEFAULT_SNAPSHOT_COUNT,
-        help="Number of snapshots in the series (default: 10).",
+        help="Number of snapshots to poll (default: 240 = 10s × 24fps).",
+    )
+    parser.add_argument(
+        "--poll-hz",
+        type=float,
+        default=DEFAULT_POLL_HZ,
+        help="Live RPC poll rate in snapshots/second (default: 2).",
     )
     parser.add_argument(
         "--bins-left",
@@ -197,6 +219,7 @@ def main() -> None:
         duration_sec=args.duration_sec,
         fps=args.fps,
         snapshot_count=args.count,
+        poll_hz=args.poll_hz,
         bins_left=args.bins_left,
         bins_right=args.bins_right,
         output_path=args.output,
