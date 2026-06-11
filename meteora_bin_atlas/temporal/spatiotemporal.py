@@ -95,10 +95,15 @@ def _figure_to_rgb(fig: plt.Figure) -> np.ndarray:
     return np.asarray(img)
 
 
-def _time_x(index: int, *, t_start: int, t_end: int) -> float:
-    """Map snapshot index to X: NOW (t_end) at 0, oldest (t_start) at 1."""
-    span = max(1, t_end - t_start)
-    return (t_end - index) / span
+def _time_x(layer_age: int, *, history: int) -> float:
+    """Map layer age to X: NOW (age=0) at 0, oldest slot in the window at 1.
+
+    Uses a fixed history span so early frames grow from the front toward the back
+    instead of compressing visible slices to fill the full axis (which puts the
+    second snapshot at the far end before the middle exists).
+    """
+    span = max(1, history - 1)
+    return layer_age / span
 
 
 def _liquidity_at_active(trace: SnapshotTrace) -> float:
@@ -165,20 +170,20 @@ def _draw_drift_path(
     t_start: int,
     current_index: int,
     liquidity_scale: float,
+    history: int,
     style: SpatiotemporalStyle,
 ) -> None:
     indices = list(range(t_start, current_index + 1))
     if len(indices) < 2:
         return
 
-    t_end = current_index
-    xs = [_time_x(i, t_start=t_start, t_end=t_end) for i in indices]
+    layer_ages = [current_index - i for i in indices]
+    xs = [_time_x(age, history=history) for age in layer_ages]
     ys = [float(traces[i].active_bin_id) for i in indices]
     z_scale = 1.0 / max(liquidity_scale, 1e-9)
     zs = [_liquidity_at_active(traces[i]) * z_scale + DRIFT_LIFT for i in indices]
 
     drift_rgb = style.drift
-    layer_ages = [current_index - i for i in indices]
     for seg in range(len(indices) - 1):
         seg_age = max(layer_ages[seg], layer_ages[seg + 1])
         seg_rgb = _mute_rgb(drift_rgb, layer_age=seg_age, background=style.background)
@@ -299,7 +304,7 @@ def render_spatiotemporal_frame(
 
     for ti in range(t_start, current_index):
         layer_age = current_index - ti
-        x_time = _time_x(ti, t_start=t_start, t_end=current_index)
+        x_time = _time_x(layer_age, history=history)
         _draw_liquidity_slice(
             ax,
             trace=traces[ti],
@@ -315,7 +320,7 @@ def render_spatiotemporal_frame(
         ax,
         trace=traces[current_index],
         frame=frame,
-        x_time=_time_x(current_index, t_start=t_start, t_end=current_index),
+        x_time=_time_x(0, history=history),
         liquidity_scale=liquidity_scale,
         layer_age=0,
         style=style,
@@ -327,6 +332,7 @@ def render_spatiotemporal_frame(
         t_start=t_start,
         current_index=current_index,
         liquidity_scale=liquidity_scale,
+        history=history,
         style=style,
     )
 
