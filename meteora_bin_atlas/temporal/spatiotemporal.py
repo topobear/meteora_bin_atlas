@@ -16,7 +16,9 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from meteora_bin_atlas.temporal.seismic import (
     GlobalFrame,
     SnapshotTrace,
+    _clamp_to_atlas,
     _hex_to_rgb,
+    _observed_extent,
     compute_display_frame,
     encode_mp4,
     prepare_snapshot_traces,
@@ -119,6 +121,47 @@ def _liquidity_at_active(trace: SnapshotTrace) -> float:
     return 0.0
 
 
+def _envelope_indices(liquidity: np.ndarray) -> tuple[int, int]:
+    """First/last bin indices with liquidity in a aligned grid row."""
+    nz = np.flatnonzero(liquidity > 0)
+    if len(nz) == 0:
+        return 0, max(0, len(liquidity) - 1)
+    return int(nz[0]), int(nz[-1])
+
+
+def _ensure_landscape_frame(
+    traces: list[SnapshotTrace],
+    t_start: int,
+    current_index: int,
+    frame: GlobalFrame,
+    atlas: GlobalFrame | None,
+    *,
+    pad_bins: int,
+    min_bins: int,
+) -> GlobalFrame:
+    """Expand the Y viewport so every visible snapshot's liquidity fits with padding."""
+    content_lo = frame.bin_id_min
+    content_hi = frame.bin_id_max
+    for ti in range(t_start, current_index + 1):
+        lo, hi = _observed_extent(traces[ti])
+        content_lo = min(content_lo, lo)
+        content_hi = max(content_hi, hi)
+
+    padded_lo = content_lo - pad_bins
+    padded_hi = content_hi + pad_bins
+    span = max(padded_hi - padded_lo + 1, min_bins, frame.n_bins)
+    mid = (content_lo + content_hi) // 2
+    lo = mid - span // 2
+    hi = lo + span - 1
+    lo = min(lo, padded_lo, frame.bin_id_min)
+    hi = max(hi, padded_hi, frame.bin_id_max)
+    if hi - lo + 1 < span:
+        mid = (lo + hi) // 2
+        lo = mid - span // 2
+        hi = lo + span - 1
+    return GlobalFrame(*_clamp_to_atlas(lo, hi, atlas))
+
+
 def _trace_grid(
     trace: SnapshotTrace,
     frame: GlobalFrame,
@@ -184,19 +227,13 @@ def _draw_liquidity_landscape(
     if not indices:
         return
 
-    z_scale = 1.0 / max(liquidity_scale, 1e-9)
-    grids = [_trace_grid(traces[i], frame) for i in indices]
-    x_times = [_time_x(current_index - i, history=history) for i in indices]
-
-    quads: list[list[tuple[float, float, float]]] = []
-    face_colors: list[tuple[float, float, float, float]] = []
-    edge_colors: list[tuple[float, float, float, float]] = []
-
-    def add_cap(trace_idx: int, *, layer_age: int) -> None:
+    def add_profile_cap(trace_idx: int, *, layer_age: int) -> None:
+        """Vertical face at one time slice: floor → surface along bin id."""
         bins, liquidity, x_amount, y_amount = grids[trace_idx]
         x_time = x_times[trace_idx]
         trace = traces[indices[trace_idx]]
-        for i in range(len(bins) - 1):
+        lo, hi = envelopes[trace_idx]
+        for i in range(lo, hi):
             z0 = float(liquidity[i]) * z_scale
             z1 = float(liquidity[i + 1]) * z_scale
             if z0 <= 0.0 and z1 <= 0.0:
@@ -217,6 +254,62 @@ def _draw_liquidity_landscape(
                 [(x_time, y0, z0), (x_time, y1, z1), (x_time, y1, 0.0), (x_time, y0, 0.0)],
                 rgb,
             )
+
+    def add_side_wall(t: int, *, side: str) -> None:
+        """Side skirt between two time slices at the liquidity envelope edge."""
+        bins, liq0, xa0, ya0 = grids[t]
+        _, liq1, xa1, ya1 = grids[t + 1]
+        x0, x1 = x_times[t], x_times[t + 1]
+        age0 = current_index - indices[t]
+        age1 = current_index - indices[t + 1]
+        lo0, hi0 = envelopes[t]
+        lo1, hi1 = envelopes[t + 1]
+        if side == "left":
+            i0, i1 = lo0, lo1
+        else:
+            i0, i1 = hi0, hi1
+        trace0 = traces[indices[t]]
+        trace1 = traces[indices[t + 1]]
+
+        y0, y1 = float(bins[i0]), float(bins[i1])
+        z00 = float(liq0[i0]) * z_scale
+        z10 = float(liq1[i1]) * z_scale
+        if max(z00, z10) <= 0.0:
+            return
+
+        rgb0 = _bin_rgb(
+            trace0,
+            int(bins[i0]),
+            float(xa0[i0]),
+            float(ya0[i0]),
+            layer_age=age0,
+            style=style,
+        )
+        rgb1 = _bin_rgb(
+            trace1,
+            int(bins[i1]),
+            float(xa1[i1]),
+            float(ya1[i1]),
+            layer_age=age1,
+            style=style,
+        )
+        rgb = tuple((a + b) / 2.0 for a, b in zip(rgb0, rgb1))
+        _add_quad(
+            quads,
+            face_colors,
+            edge_colors,
+            [(x0, y0, 0.0), (x0, y0, z00), (x1, y1, z10), (x1, y1, 0.0)],
+            rgb,
+        )
+
+    z_scale = 1.0 / max(liquidity_scale, 1e-9)
+    grids = [_trace_grid(traces[i], frame) for i in indices]
+    x_times = [_time_x(current_index - i, history=history) for i in indices]
+    envelopes = [_envelope_indices(g[1]) for g in grids]
+
+    quads: list[list[tuple[float, float, float]]] = []
+    face_colors: list[tuple[float, float, float, float]] = []
+    edge_colors: list[tuple[float, float, float, float]] = []
 
     # Top surface: stitch consecutive snapshots along time and bin id.
     for t in range(len(indices) - 1):
@@ -268,8 +361,15 @@ def _draw_liquidity_landscape(
                 rgb,
             )
 
-    # NOW profile cap and front skirt so the leading edge reads as a solid face.
-    add_cap(len(indices) - 1, layer_age=0)
+    # NOW (front) and oldest (back) end caps.
+    add_profile_cap(len(indices) - 1, layer_age=0)
+    if len(indices) > 1:
+        add_profile_cap(0, layer_age=current_index - indices[0])
+
+    # Left/right side walls along time so the volume is closed.
+    for t in range(len(indices) - 1):
+        add_side_wall(t, side="left")
+        add_side_wall(t, side="right")
 
     if not quads:
         return
@@ -411,10 +511,20 @@ def render_spatiotemporal_frame(
     dpi: int = 100,
     history: int = SPATIOTEMPORAL_HISTORY,
     style: SpatiotemporalStyle = SpatiotemporalStyle(),
+    atlas: GlobalFrame | None = None,
 ) -> np.ndarray:
     """Render one 3D frame: X=time, Y=bin id, Z=liquidity; camera from lower-left."""
     current_index = max(0, min(current_index, len(traces) - 1))
     t_start = max(0, current_index - history + 1)
+    frame = _ensure_landscape_frame(
+        traces,
+        t_start,
+        current_index,
+        frame,
+        atlas,
+        pad_bins=SPATIOTEMPORAL_PAD_BINS,
+        min_bins=SPATIOTEMPORAL_MIN_BINS,
+    )
 
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor=style.background)
     ax = fig.add_subplot(111, projection="3d", facecolor=style.background)
@@ -506,6 +616,7 @@ def build_spatiotemporal_mp4(
                 width=width,
                 height=height,
                 dpi=dpi,
+                atlas=atlas_frame,
             )
         )
 
