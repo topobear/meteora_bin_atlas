@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,11 +12,24 @@ import pandas as pd
 
 from meteora_bin_atlas.config import DEFAULT_POOL_ADDRESS, get_pool_address
 from meteora_bin_atlas.paths import DATA_PROCESSED, DATA_SIMULATED
+from meteora_bin_atlas.temporal.calibrate import (
+    SimulationCalibration,
+    calibrate_from_real_series,
+    load_default_calibration,
+)
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series
 
-# Empirical active-bin steps from the SOL-USDC poll (snapshot deltas).
+# Legacy iid delta bag kept for explicit override only.
 DEFAULT_ACTIVE_DELTAS = (-2, -1, 0, 0, 0, 1, 1, 2, -1, 2, -2, 1, -1, 3, -1, 4)
 BIN_STEP_BPS = 4
+
+
+@dataclass
+class ActiveBinState:
+    """Latent log-price offset (in bins) with AR(1) momentum for path dependency."""
+
+    log_offset_bins: float = 0.0
+    velocity: float = 0.0
 
 
 def _active_bin_id(group: pd.DataFrame) -> int:
@@ -53,6 +67,37 @@ def _composition_y(x_amount: float, y_amount: float) -> float | str:
     if total <= 0:
         return ""
     return y_amount / total
+
+
+def _step_active_bin_from_offset(
+    anchor_active_bin_id: int,
+    active_bin_id: int,
+    state: ActiveBinState,
+    *,
+    calibration: SimulationCalibration,
+    rng: np.random.Generator,
+) -> tuple[int, ActiveBinState, int]:
+    """
+    Sticky Brownian step on the active bin with AR(1) momentum.
+
+    Latent velocity follows a correlated random walk (path-dependent). The bin
+    id only changes when the cumulative offset crosses an integer boundary, and
+    an empirical stay probability suppresses moves at short intervals — matching
+    the forward-Kolmogorov limit of a sticky DLMM price process.
+    """
+    active = calibration.active_bin
+    innov = float(rng.normal(0.0, active.sigma_bins_step))
+    state.velocity = active.momentum * state.velocity + (1.0 - active.momentum) * innov
+
+    prev_offset_int = int(round(state.log_offset_bins))
+    if abs(state.velocity) < active.velocity_stick_threshold and rng.random() < active.p_stay:
+        return active_bin_id, state, 0
+
+    state.log_offset_bins += state.velocity
+    new_offset_int = int(round(state.log_offset_bins))
+    delta = new_offset_int - prev_offset_int
+    new_active = anchor_active_bin_id + new_offset_int
+    return new_active, state, delta
 
 
 def _roll_state(
@@ -97,9 +142,11 @@ def _apply_swap_walk(
     distances: np.ndarray,
     delta: int,
     rng: np.random.Generator,
+    *,
+    intensity: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Deplete offering-side shelves on bins crossed during the active-bin move."""
-    if delta == 0:
+    if delta == 0 or intensity <= 0:
         return x_amount, y_amount, liquidity
 
     x = x_amount.copy()
@@ -112,21 +159,21 @@ def _apply_swap_walk(
             idx = dist_to_idx.get(dist)
             if idx is None or x[idx] <= 0:
                 continue
-            take = rng.uniform(0.35, 0.92)
+            take = rng.uniform(0.02, 0.12) * intensity
             removed = x[idx] * take
             x[idx] -= removed
-            y[idx] += removed * rng.uniform(0.02, 0.12)
-            liq[idx] *= 1.0 - take * rng.uniform(0.15, 0.45)
+            y[idx] += removed * rng.uniform(0.01, 0.05)
+            liq[idx] *= 1.0 - take * rng.uniform(0.05, 0.15)
     else:
         for dist in range(-1, delta - 1, -1):
             idx = dist_to_idx.get(dist)
             if idx is None or y[idx] <= 0:
                 continue
-            take = rng.uniform(0.35, 0.92)
+            take = rng.uniform(0.02, 0.12) * intensity
             removed = y[idx] * take
             y[idx] -= removed
-            x[idx] += removed * rng.uniform(0.02, 0.12)
-            liq[idx] *= 1.0 - take * rng.uniform(0.15, 0.45)
+            x[idx] += removed * rng.uniform(0.01, 0.05)
+            liq[idx] *= 1.0 - take * rng.uniform(0.05, 0.15)
 
     return x, y, liq
 
@@ -137,53 +184,45 @@ def _price_for_bin_id(bin_id: int, ref_bin_id: int, ref_price: float) -> tuple[f
     return price, price * 1000.0
 
 
-def _apply_lp_refill(
+def _apply_ou_liquidity(
     x_amount: np.ndarray,
     y_amount: np.ndarray,
     liquidity: np.ndarray,
-    distances: np.ndarray,
     template_x: np.ndarray,
     template_y: np.ndarray,
     template_liq: np.ndarray,
+    *,
+    calibration: SimulationCalibration,
+    interval_sec: float,
+    delta: int,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Slowly restore depleted bins toward the seed profile."""
-    x = x_amount.copy()
-    y = y_amount.copy()
-    liq = liquidity.copy()
+    """
+    Ornstein–Uhlenbeck mean reversion toward the seed profile plus calibrated noise.
 
-    for i, dist in enumerate(distances):
-        target_x = template_x[i]
-        target_y = template_y[i]
-        target_liq = template_liq[i]
+    When the active bin moves, swap-walk depletion dominates; OU adds slower LP-style
+    refill and microstructure jitter anchored to real stationary volatility.
+    """
+    liq_cal = calibration.liquidity
+    dt = max(interval_sec, 1e-3)
+    mean_rev = 1.0 - np.exp(-liq_cal.ou_kappa * dt)
+    rel_sigma = liq_cal.moving_rel_sigma if delta != 0 else liq_cal.stationary_rel_sigma
+    noise_scale = rel_sigma * np.sqrt(dt)
 
-        if dist < 0 and target_y > 0 and y[i] < target_y * 0.85:
-            y[i] += (target_y - y[i]) * rng.uniform(0.02, 0.09)
-        elif dist > 0 and target_x > 0 and x[i] < target_x * 0.85:
-            x[i] += (target_x - x[i]) * rng.uniform(0.02, 0.09)
-        elif dist == 0:
-            if x[i] < target_x * 0.7:
-                x[i] += (target_x - x[i]) * rng.uniform(0.03, 0.12)
-            if y[i] < target_y * 0.7:
-                y[i] += (target_y - y[i]) * rng.uniform(0.03, 0.12)
+    x = x_amount + mean_rev * (template_x - x_amount)
+    y = y_amount + mean_rev * (template_y - y_amount)
+    liq = liquidity + mean_rev * (template_liq - liquidity)
 
-        if liq[i] < target_liq * 0.8:
-            liq[i] += (target_liq - liq[i]) * rng.uniform(0.02, 0.08)
+    x += template_x * noise_scale * rng.normal(0.0, 1.0, size=x.shape)
+    y += template_y * noise_scale * rng.normal(0.0, 1.0, size=y.shape)
+    liq += template_liq * noise_scale * rng.normal(0.0, 1.0, size=liq.shape)
 
-    return x, y, liq
+    span = liq_cal.jitter_span
+    x *= rng.uniform(1.0 - span, 1.0 + span, size=x.shape)
+    y *= rng.uniform(1.0 - span, 1.0 + span, size=y.shape)
+    liq *= rng.uniform(1.0 - span / 2, 1.0 + span / 2, size=liq.shape)
 
-
-def _jitter_amounts(
-    x_amount: np.ndarray,
-    y_amount: np.ndarray,
-    liquidity: np.ndarray,
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    noise = rng.uniform(0.985, 1.015, size=x_amount.shape)
-    x = np.maximum(0.0, x_amount * noise)
-    y = np.maximum(0.0, y_amount * rng.uniform(0.985, 1.015, size=y_amount.shape))
-    liq = np.maximum(0.0, liquidity * rng.uniform(0.99, 1.01, size=liquidity.shape))
-    return x, y, liq
+    return np.maximum(0.0, x), np.maximum(0.0, y), np.maximum(0.0, liq)
 
 
 def _build_snapshot_rows(
@@ -239,14 +278,20 @@ def simulate_bin_atlas_series(
     snapshot_count: int,
     interval_sec: float = 10.0,
     start_time: datetime | None = None,
-    active_deltas: tuple[int, ...] = DEFAULT_ACTIVE_DELTAS,
+    active_deltas: tuple[int, ...] | None = None,
+    motion_scale: float = 0.75,
+    calibration: SimulationCalibration | None = None,
+    pool_address: str | None = None,
     rng: np.random.Generator | None = None,
 ) -> pd.DataFrame:
     """
-    Evolve a seed snapshot into a longer series with swap-walk + LP-refill dynamics.
+    Evolve a seed snapshot into a longer series with Brownian price + OU liquidity.
 
-    Each step recenters the ±N bin neighborhood on the new active bin, depletes
-    shelves when price moves, and slowly refills toward the seed profile.
+    Active-bin steps follow a latent Brownian path (forward Kolmogorov limit) with
+    AR(1) momentum, calibrated from real polls and OHLCV vol. Liquidity mean-reverts
+    toward the seed profile with noise fitted from real stationary/moving steps.
+
+    Pass ``active_deltas`` to force the legacy iid delta sampler instead.
     """
     if snapshot_count < 1:
         raise ValueError("snapshot_count must be >= 1")
@@ -254,22 +299,30 @@ def simulate_bin_atlas_series(
     rng = rng or np.random.default_rng()
     profile = _profile_by_distance(seed_df)
     distances = profile.index.to_numpy(dtype=int)
-    n_bins = len(distances)
 
     template_x = profile["x_amount_num"].to_numpy(dtype=np.float64)
     template_y = profile["y_amount_num"].to_numpy(dtype=np.float64)
     template_liq = profile["liquidity_num"].to_numpy(dtype=np.float64)
 
-    active_bin_id = _active_bin_id(seed_df)
-    ref_bin_id = active_bin_id
+    anchor_active_bin_id = _active_bin_id(seed_df)
+    active_bin_id = anchor_active_bin_id
+    ref_bin_id = anchor_active_bin_id
     ref_price = float(pd.to_numeric(seed_df.loc[seed_df["bin_id"] == ref_bin_id, "price"].iloc[0]))
-    pool_address = str(seed_df["pool_address"].iloc[0])
+    pool_address = pool_address or str(seed_df["pool_address"].iloc[0])
     template_row = seed_df.iloc[0]
     start = start_time or datetime.now(tz=UTC)
+
+    if active_deltas is None and calibration is None:
+        calibration = load_default_calibration(
+            pool_address,
+            interval_sec=interval_sec,
+            motion_scale=motion_scale,
+        )
 
     x_amount = template_x.copy()
     y_amount = template_y.copy()
     liquidity = template_liq.copy()
+    bin_state = ActiveBinState()
 
     all_rows: list[dict[str, object]] = []
     for snapshot_index in range(snapshot_count):
@@ -293,8 +346,19 @@ def simulate_bin_atlas_series(
         if snapshot_index + 1 >= snapshot_count:
             break
 
-        delta = int(rng.choice(active_deltas))
-        active_bin_id += delta
+        if active_deltas is not None:
+            delta = int(rng.choice(active_deltas))
+            active_bin_id += delta
+        else:
+            assert calibration is not None
+            active_bin_id, bin_state, delta = _step_active_bin_from_offset(
+                anchor_active_bin_id,
+                active_bin_id,
+                bin_state,
+                calibration=calibration,
+                rng=rng,
+            )
+
         x_amount, y_amount, liquidity = _roll_state(
             x_amount,
             y_amount,
@@ -307,21 +371,93 @@ def simulate_bin_atlas_series(
             rng,
         )
         x_amount, y_amount, liquidity = _apply_swap_walk(
-            x_amount, y_amount, liquidity, distances, delta, rng
-        )
-        x_amount, y_amount, liquidity = _apply_lp_refill(
             x_amount,
             y_amount,
             liquidity,
             distances,
-            template_x,
-            template_y,
-            template_liq,
+            delta,
             rng,
+            intensity=(
+                calibration.liquidity.swap_intensity
+                if calibration is not None and active_deltas is None
+                else 1.0
+            ),
         )
-        x_amount, y_amount, liquidity = _jitter_amounts(x_amount, y_amount, liquidity, rng)
+        if calibration is not None and active_deltas is None:
+            x_amount, y_amount, liquidity = _apply_ou_liquidity(
+                x_amount,
+                y_amount,
+                liquidity,
+                template_x,
+                template_y,
+                template_liq,
+                calibration=calibration,
+                interval_sec=interval_sec,
+                delta=delta,
+                rng=rng,
+            )
+        else:
+            x_amount, y_amount, liquidity = _legacy_lp_refill(
+                x_amount,
+                y_amount,
+                liquidity,
+                distances,
+                template_x,
+                template_y,
+                template_liq,
+                rng,
+            )
+            x_amount, y_amount, liquidity = _legacy_jitter(x_amount, y_amount, liquidity, rng)
 
     return pd.DataFrame(all_rows)
+
+
+def _legacy_lp_refill(
+    x_amount: np.ndarray,
+    y_amount: np.ndarray,
+    liquidity: np.ndarray,
+    distances: np.ndarray,
+    template_x: np.ndarray,
+    template_y: np.ndarray,
+    template_liq: np.ndarray,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    x = x_amount.copy()
+    y = y_amount.copy()
+    liq = liquidity.copy()
+
+    for i, dist in enumerate(distances):
+        target_x = template_x[i]
+        target_y = template_y[i]
+        target_liq = template_liq[i]
+
+        if dist < 0 and target_y > 0 and y[i] < target_y * 0.85:
+            y[i] += (target_y - y[i]) * rng.uniform(0.02, 0.09)
+        elif dist > 0 and target_x > 0 and x[i] < target_x * 0.85:
+            x[i] += (target_x - x[i]) * rng.uniform(0.02, 0.09)
+        elif dist == 0:
+            if x[i] < target_x * 0.7:
+                x[i] += (target_x - x[i]) * rng.uniform(0.03, 0.12)
+            if y[i] < target_y * 0.7:
+                y[i] += (target_y - y[i]) * rng.uniform(0.03, 0.12)
+
+        if liq[i] < target_liq * 0.8:
+            liq[i] += (target_liq - liq[i]) * rng.uniform(0.02, 0.08)
+
+    return x, y, liq
+
+
+def _legacy_jitter(
+    x_amount: np.ndarray,
+    y_amount: np.ndarray,
+    liquidity: np.ndarray,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    noise = rng.uniform(0.985, 1.015, size=x_amount.shape)
+    x = np.maximum(0.0, x_amount * noise)
+    y = np.maximum(0.0, y_amount * rng.uniform(0.985, 1.015, size=y_amount.shape))
+    liq = np.maximum(0.0, liquidity * rng.uniform(0.99, 1.01, size=liquidity.shape))
+    return x, y, liq
 
 
 def write_simulated_series_csv(
@@ -348,6 +484,8 @@ def build_simulated_series(
     seed_dir: Path = DATA_PROCESSED,
     simulated_dir: Path = DATA_SIMULATED,
     rng_seed: int | None = None,
+    motion_scale: float = 0.75,
+    active_deltas: tuple[int, ...] | None = None,
 ) -> tuple[pd.DataFrame, Path]:
     """Seed from a real series in ``data/processed``, simulate, write to ``data/simulated``."""
     pool_address = pool_address or get_pool_address()
@@ -362,10 +500,23 @@ def build_simulated_series(
         series_df, seed_source = load_bin_atlas_series(pool_address, processed_dir=seed_dir)
 
     seed = _seed_snapshot(series_df, seed_index)
+    calibration = None
+    if active_deltas is None:
+        calibration = calibrate_from_real_series(
+            series_df,
+            pool_address=pool_address,
+            interval_sec=interval_sec,
+            motion_scale=motion_scale,
+        )
+
     simulated = simulate_bin_atlas_series(
         seed,
         snapshot_count=snapshot_count,
         interval_sec=interval_sec,
+        active_deltas=active_deltas,
+        motion_scale=motion_scale,
+        calibration=calibration,
+        pool_address=pool_address,
         rng=rng,
     )
     output_path = write_simulated_series_csv(
@@ -375,6 +526,12 @@ def build_simulated_series(
     )
 
     print(f"Seed: {seed_source} (snapshot_index={seed['snapshot_index'].iloc[0]})")
+    if calibration is not None:
+        print(
+            f"  Brownian σ_step={calibration.active_bin.sigma_bins_step:.3f} "
+            f"P(stay)={calibration.active_bin.p_stay:.3f} "
+            f"(motion_scale={motion_scale}, interval={interval_sec}s)"
+        )
     print(f"Wrote {output_path}")
     print(f"  {snapshot_count} simulated snapshots, {interval_sec}s apart, {len(simulated)} rows")
     return simulated, output_path
@@ -422,6 +579,17 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="RNG seed for reproducible simulation.",
     )
+    parser.add_argument(
+        "--motion-scale",
+        type=float,
+        default=0.75,
+        help="Blend empirical vs OHLCV Brownian motion (0–1, default 0.75).",
+    )
+    parser.add_argument(
+        "--legacy-deltas",
+        action="store_true",
+        help="Use the old iid DEFAULT_ACTIVE_DELTAS sampler instead of Brownian steps.",
+    )
     return parser.parse_args()
 
 
@@ -434,6 +602,8 @@ def main() -> None:
         seed_index=args.seed_index,
         seed_csv=args.seed_csv,
         rng_seed=args.seed,
+        motion_scale=args.motion_scale,
+        active_deltas=DEFAULT_ACTIVE_DELTAS if args.legacy_deltas else None,
     )
 
 

@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data clear-plots discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated temporal temporal-simulated timelapse timelapse-simulated simulate-series render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated temporal temporal-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
 ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
@@ -241,6 +241,12 @@ SIM_ARGS = --count $(SIM_COUNT) --interval-sec $(SIM_INTERVAL_SEC) $(if $(SIM_SE
 
 simulate-series:
 	poetry run python -m meteora_bin_atlas.temporal.simulate --pool $(POOL) $(SIM_ARGS)
+
+MOTION_SCALE ?= 0.75
+COMPARE_SIM_ARGS = --pool $(POOL) --interval-sec $(SIM_INTERVAL_SEC) --motion-scale $(MOTION_SCALE)
+
+compare-simulation:
+	poetry run python -m meteora_bin_atlas.temporal.compare $(COMPARE_SIM_ARGS)
 
 render-mp4:
 	poetry run python -m meteora_bin_atlas.temporal.render --pool $(POOL) $(RENDER_ARGS)
