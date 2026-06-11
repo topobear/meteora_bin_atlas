@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data clear-plots discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated temporal temporal-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated temporal temporal-simulated spatiotemporal spatiotemporal-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
 ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
@@ -82,6 +82,9 @@ help:
 	@echo "  make temporal           240 snaps @ 1.5Hz → 10s MP4 @ 24fps (1 snap = 1 frame)"
 	@echo "                          DATASET=simulated → no RPC (~seconds)"
 	@echo "  make temporal-simulated alias for temporal DATASET=simulated"
+	@echo "  make spatiotemporal     same as temporal but 3D platformer view (bin × time × liquidity)"
+	@echo "                          DATASET=simulated → no RPC (~seconds)"
+	@echo "  make spatiotemporal-simulated alias for spatiotemporal DATASET=simulated"
 	@echo "  make timelapse          2400 snaps @ 1.5Hz → 10s MP4 @ 24fps (subsampled timelapse)"
 	@echo "                          DATASET=simulated → no RPC, 480 snaps default (~1 min)"
 	@echo "  make timelapse-simulated  alias for timelapse DATASET=simulated"
@@ -188,6 +191,13 @@ temporal:
 
 temporal-simulated:
 	$(MAKE) temporal DATASET=simulated
+
+spatiotemporal:
+	poetry run python -m meteora_bin_atlas.temporal.spatiotemporal_run $(TEMPORAL_ARGS) \
+		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+
+spatiotemporal-simulated:
+	$(MAKE) spatiotemporal DATASET=simulated
 
 # Poll many snapshots at the same Hz, subsample into a 10s MP4.
 TIMELAPSE_DURATION_SEC ?= 10
