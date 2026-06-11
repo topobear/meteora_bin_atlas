@@ -14,11 +14,8 @@ from matplotlib.colors import to_rgb
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from meteora_bin_atlas.temporal.seismic import (
-    SEISMIC_ACTIVE_COLOR,
-    SEISMIC_TOKEN_COLORS,
     GlobalFrame,
     SnapshotTrace,
-    _composition_rgb,
     _hex_to_rgb,
     compute_display_frame,
     encode_mp4,
@@ -30,12 +27,29 @@ SPATIOTEMPORAL_HISTORY = 48
 # Camera: time (X) reads lower-left (NOW) → upper-right (past) on screen.
 PLATFORMER_ELEV = 28.0
 PLATFORMER_AZIM = 142.0
-# NOW slice is fully opaque; older slices fade toward the upper-right (past).
-SLICE_ALPHA_BASE = 1.0
-SLICE_ALPHA_DECAY = 0.82
-SLICE_ALPHA_MIN = 0.06
+# Older time slices mute toward the background (no alpha fade).
+SLICE_MUTE_DECAY = 0.94
+SLICE_MUTE_MIN = 0.42
 # Active-bin drift ribbon sits slightly above the liquidity surface.
 DRIFT_LIFT = 0.04
+# Muted watercolor-cybernetic palette — dusty teals/mauves rather than neon.
+SPATIOTEMPORAL_TOKEN_COLORS = {
+    "X": "#A8789E",
+    "Y": "#6AABB8",
+    "mix": "#958FA8",
+    "empty": "#1A1E24",
+}
+SPATIOTEMPORAL_ACTIVE_COLOR = "#C99562"
+RIDGE_DARKEN = 0.62
+RIDGE_LINEWIDTH = 0.35
+
+
+def _as_rgb_tuple(rgb) -> tuple[float, float, float]:
+    return tuple(float(c) for c in rgb)
+
+
+def _ridge_edge(rgb: tuple[float, float, float]) -> tuple[float, float, float, float]:
+    return (*tuple(max(0.0, c * RIDGE_DARKEN) for c in rgb), 1.0)
 
 
 @dataclass(frozen=True)
@@ -43,13 +57,32 @@ class SpatiotemporalStyle:
     background: tuple[float, float, float] = (0.01, 0.01, 0.02)
     grid: tuple[float, float, float, float] = (0.24, 0.31, 0.39, 0.22)
     hud: tuple[float, float, float] = (0.75, 0.82, 0.90)
-    drift: tuple[float, float, float] = (1.0, 0.54, 0.0)
+    drift: tuple[float, float, float] = (0.79, 0.58, 0.38)
 
 
-def _slice_alpha(layer_age: int) -> float:
+def _composition_rgb(x_amount: float, y_amount: float) -> tuple[int, int, int]:
+    x = max(0.0, x_amount)
+    y = max(0.0, y_amount)
+    total = x + y
+    if total <= 0:
+        return _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["empty"])
+    share_x = x / total
+    y_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"])
+    x_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"])
+    return tuple(int(round(y_rgb[i] + (x_rgb[i] - y_rgb[i]) * share_x)) for i in range(3))
+
+
+def _mute_rgb(
+    rgb: tuple[float, float, float],
+    *,
+    layer_age: int,
+    background: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    rgb = _as_rgb_tuple(rgb)
     if layer_age <= 0:
-        return SLICE_ALPHA_BASE
-    return max(SLICE_ALPHA_MIN, SLICE_ALPHA_BASE * (SLICE_ALPHA_DECAY**layer_age))
+        return rgb
+    mute = max(SLICE_MUTE_MIN, SLICE_MUTE_DECAY**layer_age)
+    return tuple(background[i] + (rgb[i] - background[i]) * mute for i in range(3))
 
 
 def _figure_to_rgb(fig: plt.Figure) -> np.ndarray:
@@ -85,12 +118,9 @@ def _draw_liquidity_slice(
     layer_age: int,
     style: SpatiotemporalStyle,
 ) -> None:
-    alpha = _slice_alpha(layer_age)
-    if alpha <= 0:
-        return
-
     quads: list[list[tuple[float, float, float]]] = []
     face_colors: list[tuple[float, float, float, float]] = []
+    edge_colors: list[tuple[float, float, float, float]] = []
 
     visible = (trace.bin_ids >= frame.bin_id_min) & (trace.bin_ids <= frame.bin_id_max)
     bin_ids = trace.bin_ids[visible]
@@ -109,20 +139,22 @@ def _draw_liquidity_slice(
         z1 = float(liquidity[i + 1]) * z_scale
 
         if int(bin_ids[i]) == trace.active_bin_id:
-            rgb = to_rgb(SEISMIC_ACTIVE_COLOR)
+            rgb = _as_rgb_tuple(to_rgb(SPATIOTEMPORAL_ACTIVE_COLOR))
         else:
             rgb = tuple(c / 255.0 for c in _composition_rgb(float(x_amount[i]), float(y_amount[i])))
+        rgb = _mute_rgb(rgb, layer_age=layer_age, background=style.background)
 
         quad = [(x_time, y0, 0.0), (x_time, y0, z0), (x_time, y1, z1), (x_time, y1, 0.0)]
         quads.append(quad)
-        face_colors.append((*rgb, alpha))
+        face_colors.append((*rgb, 1.0))
+        edge_colors.append(_ridge_edge(rgb))
 
     if not quads:
         return
 
-    mesh = Poly3DCollection(quads, linewidths=0.0)
+    mesh = Poly3DCollection(quads, linewidths=RIDGE_LINEWIDTH)
     mesh.set_facecolor(face_colors)
-    mesh.set_edgecolor((0, 0, 0, 0))
+    mesh.set_edgecolor(edge_colors)
     ax.add_collection3d(mesh)
 
 
@@ -147,15 +179,15 @@ def _draw_drift_path(
 
     drift_rgb = style.drift
     layer_ages = [current_index - i for i in indices]
-    line_alphas = [_slice_alpha(age) for age in layer_ages]
     for seg in range(len(indices) - 1):
+        seg_age = max(layer_ages[seg], layer_ages[seg + 1])
+        seg_rgb = _mute_rgb(drift_rgb, layer_age=seg_age, background=style.background)
         ax.plot(
             xs[seg : seg + 2],
             ys[seg : seg + 2],
             zs[seg : seg + 2],
-            color=drift_rgb,
+            color=seg_rgb,
             linewidth=3.2,
-            alpha=max(line_alphas[seg], line_alphas[seg + 1]),
             zorder=10,
         )
     ax.scatter(
@@ -216,8 +248,8 @@ def _style_axes(
         fontsize=10,
     )
 
-    y_rgb = tuple(c / 255 for c in _hex_to_rgb(SEISMIC_TOKEN_COLORS["Y"]))
-    x_rgb = tuple(c / 255 for c in _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"]))
+    y_rgb = tuple(c / 255 for c in _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"]))
+    x_rgb = tuple(c / 255 for c in _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"]))
     mix_rgb = tuple(c / 255 for c in _composition_rgb(1.0, 1.0))
     drift_rgb = style.drift
     legend_x = 0.99
