@@ -638,6 +638,13 @@ def _draw_drift_seismograph(
     plot_box: tuple[int, int, int, int],
     style: SeismicStyle,
     window: int = DRIFT_WINDOW,
+    strip_left: int = DRIFT_STRIP_LEFT,
+    strip_right: int = DRIFT_STRIP_RIGHT,
+    time_label_step_sec: float | None = None,
+    snapshots_per_video_sec: float = 1.0,
+    left_drift_color: tuple[int, int, int] | None = None,
+    right_drift_color: tuple[int, int, int] | None = None,
+    trace_color: tuple[int, int, int] | None = None,
 ) -> None:
     """Vertical sparkline of active-bin drift (left/right) from the series centre.
 
@@ -649,8 +656,8 @@ def _draw_drift_seismograph(
         return
 
     _, top, _, bottom = plot_box
-    strip_cx = (DRIFT_STRIP_LEFT + DRIFT_STRIP_RIGHT) / 2.0
-    half_w = (DRIFT_STRIP_RIGHT - DRIFT_STRIP_LEFT) / 2.0 - DRIFT_STRIP_EDGE_PAD
+    strip_cx = (strip_left + strip_right) / 2.0
+    half_w = (strip_right - strip_left) / 2.0 - DRIFT_STRIP_EDGE_PAD
 
     active_ids = np.array([t.active_bin_id for t in traces], dtype=np.float64)
     # Trailing rolling-mean centre: each sample's drift is measured against the
@@ -687,16 +694,17 @@ def _draw_drift_seismograph(
 
     # Panel + centre baseline (drift = 0).
     draw.rectangle(
-        [DRIFT_STRIP_LEFT - 3, top, DRIFT_STRIP_RIGHT + 3, bottom],
+        [strip_left - 3, top, strip_right + 3, bottom],
         fill=(6, 10, 14, 130),
         outline=(*style.hud[:3], 45),
     )
     draw.line([(strip_cx, top), (strip_cx, bottom)], fill=(*style.baseline[:3], 130), width=1)
-    # Match the histogram orientation: lower bin ids sit on the LEFT and hold Y
-    # (cyan); higher bin ids sit on the RIGHT and hold X (magenta).  A leftward
-    # drift means the active bin dropped to a lower id, so colour it cyan.
-    left_color = _hex_to_rgb(SEISMIC_TOKEN_COLORS["Y"])   # drift left of centre
-    right_color = _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"])  # drift right of centre
+    # 2D seismic: lower bin ids on the LEFT hold Y (cyan); higher ids on the RIGHT
+    # hold X (magenta). Callers may override colours/orientation (e.g. spatiotemporal
+    # 3D camera reads bin id with X on the left, Y on the right).
+    left_color = left_drift_color or _hex_to_rgb(SEISMIC_TOKEN_COLORS["Y"])
+    right_color = right_drift_color or _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"])
+    trace_rgb = trace_color or _TRACE_OUTLINE_BASE
 
     # Filled horizontal deflections from the centre line — the "seismic" body.
     for i in range(first, n):
@@ -712,19 +720,49 @@ def _draw_drift_seismograph(
     # Bright trace line over the fill.
     points = [(x_for(i), y_for(i)) for i in range(first, n + 1)]
     if len(points) >= 2:
-        draw.line(points, fill=(*_TRACE_OUTLINE_BASE, 225), width=2, joint="curve")
+        draw.line(points, fill=(*trace_rgb, 225), width=2, joint="curve")
 
     # NOW marker pinned at the bottom: gridline + dot at the latest sample.
     nx, ny = x_for(n), y_for(n)
-    draw.line([(DRIFT_STRIP_LEFT, ny), (DRIFT_STRIP_RIGHT, ny)], fill=(255, 255, 255, 70), width=1)
+    draw.line([(strip_left, ny), (strip_right, ny)], fill=(255, 255, 255, 70), width=1)
     draw.ellipse([nx - 4, ny - 4, nx + 4, ny + 4], fill=(255, 255, 255, 255))
 
     # Bold all-caps DRIFT header (double-struck for weight); the spot headline
     # ticker sits just above it.
     label_font = _load_mono_font(20)
-    label_xy = (DRIFT_STRIP_LEFT - 2, top - 24)
+    label_xy = (strip_left - 2, top - 24)
     for dx in (0, 1):
         draw.text((label_xy[0] + dx, label_xy[1]), "DRIFT", fill=(235, 246, 255, 255), font=label_font)
+
+    if time_label_step_sec is not None and time_label_step_sec > 0:
+        tick_font = _load_mono_font(8)
+        tick_rgb = (150, 168, 188, 210)
+
+        def _tick_width(text: str) -> int:
+            if hasattr(draw, "textlength"):
+                return int(draw.textlength(text, font=tick_font))
+            return len(text) * 5
+
+        draw.text(
+            (strip_left, ny + 2),
+            "T",
+            fill=tick_rgb,
+            font=tick_font,
+        )
+        age_sec = time_label_step_sec
+        while True:
+            snap_age = int(round(age_sec * snapshots_per_video_sec))
+            if snap_age >= window or n - snap_age < first:
+                break
+            label = f"T-{int(age_sec)}"
+            y = y_for(n - snap_age)
+            draw.text(
+                (strip_left, y - 4),
+                label,
+                fill=tick_rgb,
+                font=tick_font,
+            )
+            age_sec += time_label_step_sec
 
 
 def _draw_price_ticker(

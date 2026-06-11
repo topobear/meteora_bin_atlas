@@ -27,6 +27,8 @@ from meteora_bin_atlas.temporal.seismic import prepare_snapshot_traces
 from meteora_bin_atlas.temporal.spatiotemporal import (
     SPATIOTEMPORAL_DEFAULT_BINS_LEFT,
     SPATIOTEMPORAL_DEFAULT_BINS_RIGHT,
+    SPATIOTEMPORAL_HEIGHT_IN,
+    SPATIOTEMPORAL_WIDTH_IN,
     build_spatiotemporal_mp4,
 )
 
@@ -101,8 +103,8 @@ def run_spatiotemporal(
     if not traces:
         raise ValueError(f"No snapshots found in {series_source}")
 
-    width = int(14 * dpi)
-    height = int(8 * dpi)
+    width = int(SPATIOTEMPORAL_WIDTH_IN * dpi)
+    height = int(SPATIOTEMPORAL_HEIGHT_IN * dpi)
 
     if output_path is None:
         PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -197,7 +199,7 @@ def _parse_args() -> argparse.Namespace:
         "--dpi",
         type=int,
         default=100,
-        help="Render scale (default: 100 → 1400×800).",
+        help=f"Render scale (default: 100 → {int(SPATIOTEMPORAL_WIDTH_IN * 100)}×{int(SPATIOTEMPORAL_HEIGHT_IN * 100)}).",
     )
     return parser.parse_args()
 
