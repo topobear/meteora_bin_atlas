@@ -25,15 +25,15 @@ from meteora_bin_atlas.temporal.seismic import (
     prepare_snapshot_traces,
 )
 
-# Visible history along the time (Y) axis — older slices fade toward the back.
+# Visible history along the time (X) axis — NOW at lower-left, oldest at upper-right.
 SPATIOTEMPORAL_HISTORY = 48
-# Camera: platformer oblique from mid-lower-left toward mid-upper-right.
+# Camera: time (X) reads lower-left (NOW) → upper-right (past) on screen.
 PLATFORMER_ELEV = 28.0
-PLATFORMER_AZIM = 232.0
-# Older time slices are drawn with lower alpha so the eye tracks the leading edge.
-SLICE_ALPHA_BASE = 0.92
-SLICE_ALPHA_DECAY = 0.88
-SLICE_ALPHA_MIN = 0.08
+PLATFORMER_AZIM = 142.0
+# NOW slice is fully opaque; older slices fade toward the upper-right (past).
+SLICE_ALPHA_BASE = 1.0
+SLICE_ALPHA_DECAY = 0.82
+SLICE_ALPHA_MIN = 0.06
 # Active-bin drift ribbon sits slightly above the liquidity surface.
 DRIFT_LIFT = 0.04
 
@@ -62,9 +62,10 @@ def _figure_to_rgb(fig: plt.Figure) -> np.ndarray:
     return np.asarray(img)
 
 
-def _time_y(index: int, *, t_start: int, t_end: int) -> float:
+def _time_x(index: int, *, t_start: int, t_end: int) -> float:
+    """Map snapshot index to X: NOW (t_end) at 0, oldest (t_start) at 1."""
     span = max(1, t_end - t_start)
-    return (index - t_start) / span
+    return (t_end - index) / span
 
 
 def _liquidity_at_active(trace: SnapshotTrace) -> float:
@@ -79,7 +80,7 @@ def _draw_liquidity_slice(
     *,
     trace: SnapshotTrace,
     frame: GlobalFrame,
-    y_time: float,
+    x_time: float,
     liquidity_scale: float,
     layer_age: int,
     style: SpatiotemporalStyle,
@@ -103,7 +104,7 @@ def _draw_liquidity_slice(
         if liq <= 0 and float(liquidity[i + 1]) <= 0:
             continue
 
-        x0, x1 = float(bin_ids[i]), float(bin_ids[i + 1])
+        y0, y1 = float(bin_ids[i]), float(bin_ids[i + 1])
         z0 = liq * z_scale
         z1 = float(liquidity[i + 1]) * z_scale
 
@@ -112,7 +113,7 @@ def _draw_liquidity_slice(
         else:
             rgb = tuple(c / 255.0 for c in _composition_rgb(float(x_amount[i]), float(y_amount[i])))
 
-        quad = [(x0, y_time, 0.0), (x0, y_time, z0), (x1, y_time, z1), (x1, y_time, 0.0)]
+        quad = [(x_time, y0, 0.0), (x_time, y0, z0), (x_time, y1, z1), (x_time, y1, 0.0)]
         quads.append(quad)
         face_colors.append((*rgb, alpha))
 
@@ -139,13 +140,24 @@ def _draw_drift_path(
         return
 
     t_end = current_index
-    xs = [float(traces[i].active_bin_id) for i in indices]
-    ys = [_time_y(i, t_start=t_start, t_end=t_end) for i in indices]
+    xs = [_time_x(i, t_start=t_start, t_end=t_end) for i in indices]
+    ys = [float(traces[i].active_bin_id) for i in indices]
     z_scale = 1.0 / max(liquidity_scale, 1e-9)
     zs = [_liquidity_at_active(traces[i]) * z_scale + DRIFT_LIFT for i in indices]
 
     drift_rgb = style.drift
-    ax.plot(xs, ys, zs, color=drift_rgb, linewidth=3.2, alpha=0.95, zorder=10)
+    layer_ages = [current_index - i for i in indices]
+    line_alphas = [_slice_alpha(age) for age in layer_ages]
+    for seg in range(len(indices) - 1):
+        ax.plot(
+            xs[seg : seg + 2],
+            ys[seg : seg + 2],
+            zs[seg : seg + 2],
+            color=drift_rgb,
+            linewidth=3.2,
+            alpha=max(line_alphas[seg], line_alphas[seg + 1]),
+            zorder=10,
+        )
     ax.scatter(
         [xs[-1]],
         [ys[-1]],
@@ -168,12 +180,12 @@ def _style_axes(
     current: SnapshotTrace,
     total_traces: int,
 ) -> None:
-    ax.set_xlim(frame.bin_id_min, frame.bin_id_max)
-    ax.set_ylim(0.0, 1.0)
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(frame.bin_id_min, frame.bin_id_max)
     ax.set_zlim(0.0, 1.08)
 
-    ax.set_xlabel("BIN ID", color=style.hud, labelpad=10)
-    ax.set_ylabel("TIME →", color=style.hud, labelpad=10)
+    ax.set_xlabel("TIME · NOW →", color=style.hud, labelpad=10)
+    ax.set_ylabel("BIN ID", color=style.hud, labelpad=10)
     ax.set_zlabel("LIQUIDITY", color=style.hud, labelpad=10)
 
     ax.tick_params(colors=style.hud, labelsize=8)
@@ -208,14 +220,27 @@ def _style_axes(
     x_rgb = tuple(c / 255 for c in _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"]))
     mix_rgb = tuple(c / 255 for c in _composition_rgb(1.0, 1.0))
     drift_rgb = style.drift
-    legend_y = 0.08
-    for dx, label, rgb in (
-        (0.02, f"{token_y} (Y)", y_rgb),
-        (0.16, f"{token_x} (X)", x_rgb),
-        (0.30, "mix", mix_rgb),
-        (0.42, "active / drift", drift_rgb),
+    legend_x = 0.99
+    legend_top = 0.88
+    legend_line = 0.055
+    for i, (label, rgb) in enumerate(
+        (
+            (f"{token_y} (Y)", y_rgb),
+            (f"{token_x} (X)", x_rgb),
+            ("mix", mix_rgb),
+            ("active / drift", drift_rgb),
+        )
     ):
-        ax.text2D(dx, legend_y, f"■ {label}", transform=ax.transAxes, color=rgb, fontsize=9)
+        ax.text2D(
+            legend_x,
+            legend_top - i * legend_line,
+            f"■ {label}",
+            transform=ax.transAxes,
+            color=rgb,
+            fontsize=9,
+            ha="right",
+            va="top",
+        )
 
 
 def render_spatiotemporal_frame(
@@ -233,25 +258,36 @@ def render_spatiotemporal_frame(
     history: int = SPATIOTEMPORAL_HISTORY,
     style: SpatiotemporalStyle = SpatiotemporalStyle(),
 ) -> np.ndarray:
-    """Render one 3D frame: X=bin id, Y=time, Z=liquidity; camera from lower-left."""
+    """Render one 3D frame: X=time, Y=bin id, Z=liquidity; camera from lower-left."""
     current_index = max(0, min(current_index, len(traces) - 1))
     t_start = max(0, current_index - history + 1)
 
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor=style.background)
     ax = fig.add_subplot(111, projection="3d", facecolor=style.background)
 
-    for ti in range(t_start, current_index + 1):
+    for ti in range(t_start, current_index):
         layer_age = current_index - ti
-        y_time = _time_y(ti, t_start=t_start, t_end=current_index)
+        x_time = _time_x(ti, t_start=t_start, t_end=current_index)
         _draw_liquidity_slice(
             ax,
             trace=traces[ti],
             frame=frame,
-            y_time=y_time,
+            x_time=x_time,
             liquidity_scale=liquidity_scale,
             layer_age=layer_age,
             style=style,
         )
+
+    # NOW slice drawn last so it sits on top when slices overlap in depth.
+    _draw_liquidity_slice(
+        ax,
+        trace=traces[current_index],
+        frame=frame,
+        x_time=_time_x(current_index, t_start=t_start, t_end=current_index),
+        liquidity_scale=liquidity_scale,
+        layer_age=0,
+        style=style,
+    )
 
     _draw_drift_path(
         ax,
@@ -278,7 +314,7 @@ def render_spatiotemporal_frame(
     ax.view_init(elev=PLATFORMER_ELEV, azim=PLATFORMER_AZIM)
     ax.dist = 9.5
 
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.06)
+    fig.subplots_adjust(left=0.02, right=0.90, top=0.94, bottom=0.06)
     rgb = _figure_to_rgb(fig)
     plt.close(fig)
     return rgb
