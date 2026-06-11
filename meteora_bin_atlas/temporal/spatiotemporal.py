@@ -23,7 +23,13 @@ from meteora_bin_atlas.temporal.seismic import (
 )
 
 # Visible history along the time (X) axis — NOW at lower-left, oldest at upper-right.
-SPATIOTEMPORAL_HISTORY = 48
+SPATIOTEMPORAL_HISTORY = 64
+# Wider bin viewport than the 2D seismic renderer — room for drift across the landscape.
+SPATIOTEMPORAL_PAD_BINS = 18
+SPATIOTEMPORAL_MIN_BINS = 90
+SPATIOTEMPORAL_EDGE_BAND = 24
+SPATIOTEMPORAL_DEFAULT_BINS_LEFT = 70
+SPATIOTEMPORAL_DEFAULT_BINS_RIGHT = 70
 # Camera: time (X) reads lower-left (NOW) → upper-right (past) on screen.
 PLATFORMER_ELEV = 28.0
 PLATFORMER_AZIM = 142.0
@@ -113,46 +119,157 @@ def _liquidity_at_active(trace: SnapshotTrace) -> float:
     return 0.0
 
 
-def _draw_liquidity_slice(
-    ax,
-    *,
+def _trace_grid(
     trace: SnapshotTrace,
     frame: GlobalFrame,
-    x_time: float,
-    liquidity_scale: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Align trace columns to the visible bin-id grid."""
+    bins = np.arange(frame.bin_id_min, frame.bin_id_max + 1, dtype=np.int32)
+    n = len(bins)
+    liquidity = np.zeros(n, dtype=np.float64)
+    x_amount = np.zeros(n, dtype=np.float64)
+    y_amount = np.zeros(n, dtype=np.float64)
+    positions = {int(b): i for i, b in enumerate(trace.bin_ids)}
+    for j, b in enumerate(bins):
+        idx = positions.get(int(b))
+        if idx is None:
+            continue
+        liquidity[j] = trace.liquidity[idx]
+        x_amount[j] = trace.x_amount[idx]
+        y_amount[j] = trace.y_amount[idx]
+    return bins, liquidity, x_amount, y_amount
+
+
+def _bin_rgb(
+    trace: SnapshotTrace,
+    bin_id: int,
+    x_amount: float,
+    y_amount: float,
+    *,
     layer_age: int,
     style: SpatiotemporalStyle,
+) -> tuple[float, float, float]:
+    if int(bin_id) == trace.active_bin_id:
+        rgb = _as_rgb_tuple(to_rgb(SPATIOTEMPORAL_ACTIVE_COLOR))
+    else:
+        rgb = tuple(c / 255.0 for c in _composition_rgb(x_amount, y_amount))
+    return _mute_rgb(rgb, layer_age=layer_age, background=style.background)
+
+
+def _add_quad(
+    quads: list,
+    face_colors: list,
+    edge_colors: list,
+    vertices: list[tuple[float, float, float]],
+    rgb: tuple[float, float, float],
 ) -> None:
+    quads.append(vertices)
+    face_colors.append((*rgb, 1.0))
+    edge_colors.append(_ridge_edge(rgb))
+
+
+def _draw_liquidity_landscape(
+    ax,
+    *,
+    traces: list[SnapshotTrace],
+    t_start: int,
+    current_index: int,
+    frame: GlobalFrame,
+    liquidity_scale: float,
+    history: int,
+    style: SpatiotemporalStyle,
+) -> None:
+    """Continuous bin × time surface instead of disconnected vertical slices."""
+    indices = list(range(t_start, current_index + 1))
+    if not indices:
+        return
+
+    z_scale = 1.0 / max(liquidity_scale, 1e-9)
+    grids = [_trace_grid(traces[i], frame) for i in indices]
+    x_times = [_time_x(current_index - i, history=history) for i in indices]
+
     quads: list[list[tuple[float, float, float]]] = []
     face_colors: list[tuple[float, float, float, float]] = []
     edge_colors: list[tuple[float, float, float, float]] = []
 
-    visible = (trace.bin_ids >= frame.bin_id_min) & (trace.bin_ids <= frame.bin_id_max)
-    bin_ids = trace.bin_ids[visible]
-    liquidity = trace.liquidity[visible]
-    x_amount = trace.x_amount[visible]
-    y_amount = trace.y_amount[visible]
+    def add_cap(trace_idx: int, *, layer_age: int) -> None:
+        bins, liquidity, x_amount, y_amount = grids[trace_idx]
+        x_time = x_times[trace_idx]
+        trace = traces[indices[trace_idx]]
+        for i in range(len(bins) - 1):
+            z0 = float(liquidity[i]) * z_scale
+            z1 = float(liquidity[i + 1]) * z_scale
+            if z0 <= 0.0 and z1 <= 0.0:
+                continue
+            y0, y1 = float(bins[i]), float(bins[i + 1])
+            rgb = _bin_rgb(
+                trace,
+                int(bins[i]),
+                float(x_amount[i]),
+                float(y_amount[i]),
+                layer_age=layer_age,
+                style=style,
+            )
+            _add_quad(
+                quads,
+                face_colors,
+                edge_colors,
+                [(x_time, y0, z0), (x_time, y1, z1), (x_time, y1, 0.0), (x_time, y0, 0.0)],
+                rgb,
+            )
 
-    z_scale = 1.0 / max(liquidity_scale, 1e-9)
-    for i in range(len(bin_ids) - 1):
-        liq = float(liquidity[i])
-        if liq <= 0 and float(liquidity[i + 1]) <= 0:
-            continue
+    # Top surface: stitch consecutive snapshots along time and bin id.
+    for t in range(len(indices) - 1):
+        bins, liq0, xa0, ya0 = grids[t]
+        _, liq1, xa1, ya1 = grids[t + 1]
+        x0, x1 = x_times[t], x_times[t + 1]
+        age0 = current_index - indices[t]
+        age1 = current_index - indices[t + 1]
+        trace_newer = traces[indices[t + 1]]
+        trace_older = traces[indices[t]]
 
-        y0, y1 = float(bin_ids[i]), float(bin_ids[i + 1])
-        z0 = liq * z_scale
-        z1 = float(liquidity[i + 1]) * z_scale
+        for i in range(len(bins) - 1):
+            z00 = float(liq0[i]) * z_scale
+            z01 = float(liq0[i + 1]) * z_scale
+            z10 = float(liq1[i]) * z_scale
+            z11 = float(liq1[i + 1]) * z_scale
+            if max(z00, z01, z10, z11) <= 0.0:
+                continue
 
-        if int(bin_ids[i]) == trace.active_bin_id:
-            rgb = _as_rgb_tuple(to_rgb(SPATIOTEMPORAL_ACTIVE_COLOR))
-        else:
-            rgb = tuple(c / 255.0 for c in _composition_rgb(float(x_amount[i]), float(y_amount[i])))
-        rgb = _mute_rgb(rgb, layer_age=layer_age, background=style.background)
+            y0, y1 = float(bins[i]), float(bins[i + 1])
+            rgb_newer = _bin_rgb(
+                trace_newer,
+                int(bins[i]),
+                float(xa1[i]),
+                float(ya1[i]),
+                layer_age=age1,
+                style=style,
+            )
+            rgb_older = _bin_rgb(
+                trace_older,
+                int(bins[i]),
+                float(xa0[i]),
+                float(ya0[i]),
+                layer_age=age0,
+                style=style,
+            )
+            rgb = tuple((a + b) / 2.0 for a, b in zip(rgb_newer, rgb_older))
 
-        quad = [(x_time, y0, 0.0), (x_time, y0, z0), (x_time, y1, z1), (x_time, y1, 0.0)]
-        quads.append(quad)
-        face_colors.append((*rgb, 1.0))
-        edge_colors.append(_ridge_edge(rgb))
+            _add_quad(
+                quads,
+                face_colors,
+                edge_colors,
+                [
+                    (x0, y0, z00),
+                    (x0, y1, z01),
+                    (x1, y1, z11),
+                    (x1, y0, z10),
+                ],
+                rgb,
+            )
+
+    # NOW profile cap and front skirt so the leading edge reads as a solid face.
+    add_cap(len(indices) - 1, layer_age=0)
 
     if not quads:
         return
@@ -302,27 +419,14 @@ def render_spatiotemporal_frame(
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor=style.background)
     ax = fig.add_subplot(111, projection="3d", facecolor=style.background)
 
-    for ti in range(t_start, current_index):
-        layer_age = current_index - ti
-        x_time = _time_x(layer_age, history=history)
-        _draw_liquidity_slice(
-            ax,
-            trace=traces[ti],
-            frame=frame,
-            x_time=x_time,
-            liquidity_scale=liquidity_scale,
-            layer_age=layer_age,
-            style=style,
-        )
-
-    # NOW slice drawn last so it sits on top when slices overlap in depth.
-    _draw_liquidity_slice(
+    _draw_liquidity_landscape(
         ax,
-        trace=traces[current_index],
+        traces=traces,
+        t_start=t_start,
+        current_index=current_index,
         frame=frame,
-        x_time=_time_x(0, history=history),
         liquidity_scale=liquidity_scale,
-        layer_age=0,
+        history=history,
         style=style,
     )
 
@@ -384,6 +488,11 @@ def build_spatiotemporal_mp4(
             current_index,
             display_frame,
             atlas=atlas_frame,
+            pad_bins=SPATIOTEMPORAL_PAD_BINS,
+            min_display_bins=SPATIOTEMPORAL_MIN_BINS,
+            viewport_edge_band=SPATIOTEMPORAL_EDGE_BAND,
+            rolling_snapshots=SPATIOTEMPORAL_HISTORY,
+            zoom_in_ratio=0.85,
         )
         frame_arrays.append(
             render_spatiotemporal_frame(

@@ -24,7 +24,11 @@ from meteora_bin_atlas.temporal.run import (
     fetch_temporal_data,
 )
 from meteora_bin_atlas.temporal.seismic import prepare_snapshot_traces
-from meteora_bin_atlas.temporal.spatiotemporal import build_spatiotemporal_mp4
+from meteora_bin_atlas.temporal.spatiotemporal import (
+    SPATIOTEMPORAL_DEFAULT_BINS_LEFT,
+    SPATIOTEMPORAL_DEFAULT_BINS_RIGHT,
+    build_spatiotemporal_mp4,
+)
 
 
 def run_spatiotemporal(
@@ -35,8 +39,8 @@ def run_spatiotemporal(
     fps: int = DEFAULT_FPS,
     snapshot_count: int = DEFAULT_SNAPSHOT_COUNT,
     poll_hz: float = DEFAULT_POLL_HZ,
-    bins_left: int = 30,
-    bins_right: int = 30,
+    bins_left: int = SPATIOTEMPORAL_DEFAULT_BINS_LEFT,
+    bins_right: int = SPATIOTEMPORAL_DEFAULT_BINS_RIGHT,
     output_path: Path | None = None,
     project_root: Path | None = None,
     dpi: int = 100,
@@ -174,14 +178,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bins-left",
         type=int,
-        default=30,
-        help="Bounded fetch: bins left of active (default: 30).",
+        default=SPATIOTEMPORAL_DEFAULT_BINS_LEFT,
+        help=f"Bounded fetch: bins left of active (default: {SPATIOTEMPORAL_DEFAULT_BINS_LEFT}).",
     )
     parser.add_argument(
         "--bins-right",
         type=int,
-        default=30,
-        help="Bounded fetch: bins right of active (default: 30).",
+        default=SPATIOTEMPORAL_DEFAULT_BINS_RIGHT,
+        help=f"Bounded fetch: bins right of active (default: {SPATIOTEMPORAL_DEFAULT_BINS_RIGHT}).",
     )
     parser.add_argument(
         "--output",

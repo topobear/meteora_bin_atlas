@@ -44,6 +44,8 @@ SERIES_RPC_BACKOFF_SEC ?= 60
 SERIES_INTERVAL_SEC ?= 30
 SERIES_BINS_LEFT ?= 30
 SERIES_BINS_RIGHT ?= 30
+SPATIOTEMPORAL_BINS_LEFT ?= 70
+SPATIOTEMPORAL_BINS_RIGHT ?= 70
 
 # --- Shared CLI args --------------------------------------------------------
 
@@ -194,7 +196,7 @@ temporal-simulated:
 
 spatiotemporal:
 	poetry run python -m meteora_bin_atlas.temporal.spatiotemporal_run $(TEMPORAL_ARGS) \
-		--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+		--bins-left $(SPATIOTEMPORAL_BINS_LEFT) --bins-right $(SPATIOTEMPORAL_BINS_RIGHT)
 
 spatiotemporal-simulated:
 	$(MAKE) spatiotemporal DATASET=simulated

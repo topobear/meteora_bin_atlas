@@ -208,9 +208,9 @@ def _observed_extent(trace: SnapshotTrace) -> tuple[int, int]:
     return lo, hi
 
 
-def _padded_bounds(lo: int, hi: int) -> tuple[int, int]:
-    padded_lo = lo - DISPLAY_PAD_BINS
-    padded_hi = hi + DISPLAY_PAD_BINS
+def _padded_bounds(lo: int, hi: int, *, pad_bins: int = DISPLAY_PAD_BINS) -> tuple[int, int]:
+    padded_lo = lo - pad_bins
+    padded_hi = hi + pad_bins
     span = padded_hi - padded_lo + 1
     if span >= MIN_DISPLAY_BINS:
         return padded_lo, padded_hi
@@ -219,9 +219,14 @@ def _padded_bounds(lo: int, hi: int) -> tuple[int, int]:
     return center - half, center + half
 
 
-def _rolling_observed_bounds(traces: list[SnapshotTrace], current_index: int) -> tuple[int, int]:
+def _rolling_observed_bounds(
+    traces: list[SnapshotTrace],
+    current_index: int,
+    *,
+    rolling_snapshots: int = ROLLING_SNAPSHOTS,
+) -> tuple[int, int]:
     """Union of bins with liquidity (plus active) across the recent snapshot window."""
-    start = max(0, current_index - ROLLING_SNAPSHOTS + 1)
+    start = max(0, current_index - rolling_snapshots + 1)
     lo = int(traces[start].active_bin_id)
     hi = lo
     for trace in traces[start : current_index + 1]:
@@ -231,10 +236,16 @@ def _rolling_observed_bounds(traces: list[SnapshotTrace], current_index: int) ->
     return lo, hi
 
 
-def _rolling_content_bounds(traces: list[SnapshotTrace], current_index: int) -> tuple[int, int]:
+def _rolling_content_bounds(
+    traces: list[SnapshotTrace],
+    current_index: int,
+    *,
+    rolling_snapshots: int = ROLLING_SNAPSHOTS,
+    pad_bins: int = DISPLAY_PAD_BINS,
+) -> tuple[int, int]:
     """Padded rolling bounds used for zoom-out decisions."""
-    lo, hi = _rolling_observed_bounds(traces, current_index)
-    return _padded_bounds(lo, hi)
+    lo, hi = _rolling_observed_bounds(traces, current_index, rolling_snapshots=rolling_snapshots)
+    return _padded_bounds(lo, hi, pad_bins=pad_bins)
 
 
 def _clamp_to_atlas(lo: int, hi: int, atlas: GlobalFrame | None) -> tuple[int, int]:
@@ -249,23 +260,32 @@ def compute_display_frame(
     previous: GlobalFrame | None,
     *,
     atlas: GlobalFrame | None = None,
+    pad_bins: int = DISPLAY_PAD_BINS,
+    min_display_bins: int = MIN_DISPLAY_BINS,
+    viewport_edge_band: int = VIEWPORT_EDGE_BAND,
+    rolling_snapshots: int = ROLLING_SNAPSHOTS,
+    zoom_in_ratio: float = ZOOM_IN_RATIO,
 ) -> GlobalFrame:
     """
     Sliding-window viewport with a dead-band.
 
     The active bin floats freely within the plot; the window only scrolls when
-    the active bin drifts within VIEWPORT_EDGE_BAND bins of either edge.  The
+    the active bin drifts within viewport_edge_band bins of either edge.  The
     span grows to accommodate content and shrinks (with hysteresis) when content
     is much narrower than the current window.
     """
-    observed_lo, observed_hi = _rolling_observed_bounds(traces, current_index)
+    observed_lo, observed_hi = _rolling_observed_bounds(
+        traces,
+        current_index,
+        rolling_snapshots=rolling_snapshots,
+    )
     observed_lo, observed_hi = _clamp_to_atlas(observed_lo, observed_hi, atlas)
     active = int(traces[current_index].active_bin_id)
 
-    # Required span: content + padding on each side, at least MIN_DISPLAY_BINS.
+    # Required span: content + padding on each side, at least min_display_bins.
     content_span = max(
-        observed_hi - observed_lo + 1 + 2 * DISPLAY_PAD_BINS,
-        MIN_DISPLAY_BINS,
+        observed_hi - observed_lo + 1 + 2 * pad_bins,
+        min_display_bins,
     )
 
     if previous is None:
@@ -278,7 +298,7 @@ def compute_display_frame(
     prev_span = previous.n_bins
 
     # Decide new span: only grow, or shrink if content is much narrower.
-    if content_span < ZOOM_IN_RATIO * prev_span:
+    if content_span < zoom_in_ratio * prev_span:
         span = content_span
     else:
         span = max(prev_span, content_span)
@@ -294,7 +314,7 @@ def compute_display_frame(
     # Scroll minimally so the active bin stays inside the middle ±30% of the
     # viewport. The dead-band width is 40% of the span (20% on each side of
     # center); scrolling only kicks in when the bar drifts past the outer 30%.
-    margin = max(VIEWPORT_EDGE_BAND, round(0.30 * span))
+    margin = max(viewport_edge_band, round(0.30 * span))
     if active - lo < margin:
         shift = margin - (active - lo)
         lo -= shift
