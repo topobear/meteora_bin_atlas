@@ -645,6 +645,7 @@ def _draw_drift_seismograph(
     left_drift_color: tuple[int, int, int] | None = None,
     right_drift_color: tuple[int, int, int] | None = None,
     trace_color: tuple[int, int, int] | None = None,
+    centre_line_color: tuple[int, int, int] | None = None,
 ) -> None:
     """Vertical sparkline of active-bin drift (left/right) from the series centre.
 
@@ -698,7 +699,8 @@ def _draw_drift_seismograph(
         fill=(6, 10, 14, 130),
         outline=(*style.hud[:3], 45),
     )
-    draw.line([(strip_cx, top), (strip_cx, bottom)], fill=(*style.baseline[:3], 130), width=1)
+    centre_rgb = centre_line_color or style.baseline[:3]
+    draw.line([(strip_cx, top), (strip_cx, bottom)], fill=(*centre_rgb, 130), width=1)
     # 2D seismic: lower bin ids on the LEFT hold Y (cyan); higher ids on the RIGHT
     # hold X (magenta). Callers may override colours/orientation (e.g. spatiotemporal
     # 3D camera reads bin id with X on the left, Y on the right).

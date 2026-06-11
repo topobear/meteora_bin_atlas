@@ -16,6 +16,7 @@ from meteora_bin_atlas.temporal.datasets import (
 )
 from meteora_bin_atlas.temporal.load import load_bin_atlas_series, load_simulated_bin_atlas_series
 from meteora_bin_atlas.temporal.render import resolve_token_labels
+from meteora_bin_atlas.temporal.reserve import build_price_map
 from meteora_bin_atlas.temporal.run import (
     DEFAULT_DURATION_SEC,
     DEFAULT_FPS,
@@ -99,6 +100,7 @@ def run_spatiotemporal(
 
     token_x, token_y = resolve_token_labels(pool_address, DATA_PROCESSED)
     traces, liquidity_scale, atlas_frame = prepare_snapshot_traces(series_df)
+    price_for_bin = build_price_map(series_df)
 
     if not traces:
         raise ValueError(f"No snapshots found in {series_source}")
@@ -121,6 +123,7 @@ def run_spatiotemporal(
         pool_address=pool_address,
         output_path=output_path,
         fps=fps,
+        price_for_bin=price_for_bin,
         width=width,
         height=height,
         dpi=dpi,

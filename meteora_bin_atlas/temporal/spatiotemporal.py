@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_rgb
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
 
 from meteora_bin_atlas.temporal.seismic import (
@@ -52,10 +53,11 @@ HEADLINE_FONT_SIZE = 9
 GLOSS_FONT_SIZE = 8.5
 HEADLINE_LINE_PX = 11
 GLOSS_LINE_PX = 10
-LEGEND_LINE_PX = 11
+LEGEND_LINE_PX = 13
 CAPTION_LEGEND_GAP_PX = 5
 PLOT_CAPTION_GAP_PX = 4
-LEGEND_RIGHT_PAD_PX = 8
+LEGEND_RIGHT_PAD_PX = 18
+LEGEND_FONT_SIZE = 9
 MONO_CHAR_PX = 7.0
 DRIFT_TIME_LABEL_STEP_SEC = 5.0
 # Camera: time (X) reads lower-left (NOW) → upper-right (past) on screen.
@@ -75,6 +77,9 @@ SPATIOTEMPORAL_TOKEN_COLORS = {
 SPATIOTEMPORAL_ACTIVE_COLOR = "#C99562"
 # Drift trace: very light purple over the muted X/Y fill bands.
 SPATIOTEMPORAL_DRIFT_TRACE = (225, 210, 245)
+SPATIOTEMPORAL_PRICE_LEFT = (255, 92, 110)
+SPATIOTEMPORAL_PRICE_RIGHT = (80, 170, 255)
+SPATIOTEMPORAL_PRICE_FLAT = (180, 196, 214)
 RIDGE_DARKEN = 0.62
 RIDGE_LINEWIDTH = 0.35
 CAP_LINEWIDTH = 0.0
@@ -112,6 +117,45 @@ def _composition_rgb(x_amount: float, y_amount: float) -> tuple[int, int, int]:
     y_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"])
     x_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"])
     return tuple(int(round(y_rgb[i] + (x_rgb[i] - y_rgb[i]) * share_x)) for i in range(3))
+
+
+def _format_price_value(price: float) -> str:
+    """Compact human price labels for the DLMM price axis."""
+    if price >= 1_000:
+        return f"{price:,.0f}"
+    if price >= 10:
+        return f"{price:,.2f}"
+    if price >= 1:
+        return f"{price:,.3f}"
+    return f"{price:.4g}"
+
+
+def _infer_price_step(price_for_bin: dict[int, float]) -> float | None:
+    ordered = sorted(price_for_bin)
+    ratios = [
+        price_for_bin[b + 1] / price_for_bin[b]
+        for b in ordered
+        if (b + 1) in price_for_bin and price_for_bin[b] > 0.0
+    ]
+    if not ratios:
+        return None
+    return float(np.median(ratios))
+
+
+def _price_for_axis_bin(bin_id: int, price_for_bin: dict[int, float]) -> float | None:
+    price = price_for_bin.get(bin_id)
+    if price is not None and price > 0.0:
+        return float(price)
+    if not price_for_bin:
+        return None
+    ratio = _infer_price_step(price_for_bin)
+    if ratio is None:
+        return None
+    nearest = min(price_for_bin, key=lambda known: abs(known - bin_id))
+    nearest_price = price_for_bin.get(nearest)
+    if nearest_price is None or nearest_price <= 0.0:
+        return None
+    return float(nearest_price) * (ratio ** (bin_id - nearest))
 
 
 def _mute_rgb(
@@ -183,16 +227,23 @@ def _spatiotemporal_inscription(
     total_snapshots: int,
     wrap_width: int,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Pool facts plus a short reading of the landscape."""
+    """Pool facts plus a concise reading of the landscape."""
     short = f"{pool_address[:6]}…{pool_address[-4:]}"
-    headline = f"{token_y} / {token_x} · {short} · snap {snapshot_index + 1}/{total_snapshots}"
+    headline = (
+        f"{token_y} / {token_x}  ·  Meteora DLMM  ·  {short}  ·  "
+        f"snapshot {snapshot_index + 1} of {total_snapshots}"
+    )
     gloss = (
-        "Time toward you; bin id is price; height is liquidity; colour is token; "
-        "left strip is drift."
+        f"In a Meteora DLMM pool, makers rest {token_y} and {token_x} in discrete price bins; "
+        f"the active bin is where the market presently stands. "
+        "Below, snapshots stitch into one watershed—time flows toward you, bin price climbs "
+        "the ladder, height is depth at rest, colour names the token held. "
+        "The drift scroll at left holds a slower breath: the active bin's wander from its "
+        "trailing centre, traced across a longer span than this ridge of terrain."
     )
     headline_lines = textwrap.wrap(headline, width=wrap_width, break_long_words=False)
     gloss_lines = textwrap.wrap(gloss, width=wrap_width, break_long_words=False)
-    return tuple(headline_lines[:2]), tuple(gloss_lines[:2])
+    return tuple(headline_lines[:2]), tuple(gloss_lines)
 
 
 def _compute_caption_layout(
@@ -281,6 +332,58 @@ def _draw_figure_inscription(
         y_px += GLOSS_LINE_PX
 
 
+def _draw_drift_price_ticker(
+    draw,
+    *,
+    plot_box: tuple[int, int, int, int],
+    traces: list[SnapshotTrace],
+    current_index: int,
+    price_for_bin: dict[int, float] | None,
+    token_x: str,
+    token_y: str,
+) -> None:
+    """Small live price readout pinned inside the drift strip."""
+    if not price_for_bin or not traces:
+        return
+    current = traces[current_index]
+    spot_price = _price_for_axis_bin(int(current.active_bin_id), price_for_bin)
+    if spot_price is None:
+        return
+
+    prev_bin = traces[current_index - 1].active_bin_id if current_index > 0 else current.active_bin_id
+    delta = int(current.active_bin_id) - int(prev_bin)
+    if delta < 0:
+        accent = SPATIOTEMPORAL_PRICE_LEFT
+    elif delta > 0:
+        accent = SPATIOTEMPORAL_PRICE_RIGHT
+    else:
+        accent = SPATIOTEMPORAL_PRICE_FLAT
+
+    _left, top, _right, _bottom = plot_box
+    strip_left = SPATIOTEMPORAL_DRIFT_LEFT
+    strip_right = SPATIOTEMPORAL_DRIFT_RIGHT
+    panel = [strip_left + 3, top + 7, strip_right - 3, top + 43]
+    draw.rectangle(panel, fill=(6, 9, 14, 190), outline=(*accent, 145))
+
+    label_font = _load_mono_font(8)
+    price_font = _load_mono_font(14)
+    center_x = (strip_left + strip_right) / 2.0
+    draw.text(
+        (center_x, panel[1] + 5),
+        f"{token_y}/{token_x}",
+        fill=(165, 184, 204, 235),
+        font=label_font,
+        anchor="ma",
+    )
+    draw.text(
+        (center_x, panel[1] + 18),
+        _format_price_value(spot_price),
+        fill=(*accent, 255),
+        font=price_font,
+        anchor="ma",
+    )
+
+
 def _compose_frame_overlays(
     rgb: np.ndarray,
     layout: CaptionLayout,
@@ -291,6 +394,7 @@ def _compose_frame_overlays(
     snapshots_per_video_sec: float,
     token_x: str,
     token_y: str,
+    price_for_bin: dict[int, float] | None = None,
 ) -> np.ndarray:
     """Drift seismograph (left), time ticks, and vertical colour legend."""
     from PIL import Image, ImageDraw
@@ -315,9 +419,19 @@ def _compose_frame_overlays(
         left_drift_color=_hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"]),
         right_drift_color=_hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"]),
         trace_color=SPATIOTEMPORAL_DRIFT_TRACE,
+        centre_line_color=(255, 255, 255),
+    )
+    _draw_drift_price_ticker(
+        draw,
+        plot_box=plot_box,
+        traces=traces,
+        current_index=current_index,
+        price_for_bin=price_for_bin,
+        token_x=token_x,
+        token_y=token_y,
     )
 
-    legend_font = _load_mono_font(8)
+    legend_font = _load_mono_font(LEGEND_FONT_SIZE)
     entries = (
         (f"{token_y} (Y)", _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"])),
         (f"{token_x} (X)", _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"])),
@@ -825,14 +939,26 @@ def _style_axes(
     pool_address: str,
     current: SnapshotTrace,
     total_traces: int,
+    price_for_bin: dict[int, float] | None = None,
 ) -> None:
     ax.set_xlim(-CAP_X_EPSILON - CAP_BAR_X_EPSILON, 1.0 + CAP_X_EPSILON)
     ax.set_ylim(frame.bin_id_min, frame.bin_id_max)
     ax.set_zlim(0.0, 1.08)
 
     ax.set_xlabel("← TIME", color=style.hud, labelpad=10, fontfamily="monospace")
-    ax.set_ylabel("BIN ID", color=style.hud, labelpad=10, fontfamily="monospace")
+    ax.set_ylabel(f"PRICE ({token_y}/{token_x})", color=style.hud, labelpad=10, fontfamily="monospace")
     ax.set_zlabel("LIQUIDITY", color=style.hud, labelpad=10, fontfamily="monospace")
+
+    if price_for_bin:
+        def _format_price_tick(value: float, _pos: int) -> str:
+            bin_id = int(round(value))
+            price = _price_for_axis_bin(bin_id, price_for_bin)
+            if price is None:
+                return str(bin_id)
+            return f"{_format_price_value(price)}\n{bin_id}"
+
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+        ax.yaxis.set_major_formatter(FuncFormatter(_format_price_tick))
 
     ax.tick_params(colors=style.hud, labelsize=8)
     for label in (*ax.get_xticklabels(), *ax.get_yticklabels(), *ax.get_zticklabels()):
@@ -861,6 +987,7 @@ def render_spatiotemporal_frame(
     history: int = SPATIOTEMPORAL_HISTORY,
     drift_window: int = 2,
     snapshots_per_video_sec: float = 24.0,
+    price_for_bin: dict[int, float] | None = None,
     style: SpatiotemporalStyle = SpatiotemporalStyle(),
     atlas: GlobalFrame | None = None,
 ) -> np.ndarray:
@@ -901,6 +1028,7 @@ def render_spatiotemporal_frame(
         pool_address=pool_address,
         current=current,
         total_traces=len(traces),
+        price_for_bin=price_for_bin,
     )
 
     # Platformer camera: mid-lower-left looking toward mid-upper-right.
@@ -940,6 +1068,7 @@ def render_spatiotemporal_frame(
         snapshots_per_video_sec=snapshots_per_video_sec,
         token_x=token_x,
         token_y=token_y,
+        price_for_bin=price_for_bin,
     )
 
 
@@ -954,6 +1083,7 @@ def build_spatiotemporal_mp4(
     output_path,
     fps: int,
     trace_indices: list[int] | None = None,
+    price_for_bin: dict[int, float] | None = None,
     width: int = int(SPATIOTEMPORAL_WIDTH_IN * 100),
     height: int = int(SPATIOTEMPORAL_HEIGHT_IN * 100),
     dpi: int = 100,
@@ -997,6 +1127,7 @@ def build_spatiotemporal_mp4(
                 dpi=dpi,
                 drift_window=drift_window,
                 snapshots_per_video_sec=snapshots_per_video_sec,
+                price_for_bin=price_for_bin,
                 atlas=atlas_frame,
             )
         )
