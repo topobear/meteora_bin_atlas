@@ -45,8 +45,8 @@ SPATIOTEMPORAL_HEIGHT_IN = 8.0
 SPATIOTEMPORAL_DRIFT_LEFT = 6
 SPATIOTEMPORAL_DRIFT_RIGHT = 86
 SPATIOTEMPORAL_DRIFT_GAP = 8
-SPATIOTEMPORAL_FIG_RIGHT = 0.985
-SPATIOTEMPORAL_FIG_BOTTOM = 0.06
+SPATIOTEMPORAL_FIG_RIGHT = 0.955
+SPATIOTEMPORAL_FIG_BOTTOM = 0.10
 INSCRIPTION_GAP = 10
 INSCRIPTION_TOP_PX = 8
 HEADLINE_FONT_SIZE = 9
@@ -71,12 +71,12 @@ SLICE_MUTE_MIN = 0.42
 SPATIOTEMPORAL_TOKEN_COLORS = {
     "X": "#A8789E",
     "Y": "#6AABB8",
-    "mix": "#958FA8",
+    "mix": "#8F6FD0",
     "empty": "#1A1E24",
 }
-SPATIOTEMPORAL_ACTIVE_COLOR = "#C99562"
-# Drift trace: very light purple over the muted X/Y fill bands.
-SPATIOTEMPORAL_DRIFT_TRACE = (225, 210, 245)
+SPATIOTEMPORAL_ACTIVE_COLOR = "#FFFFFF"
+# Drift trace: white centreline over the muted X/Y fill bands.
+SPATIOTEMPORAL_DRIFT_TRACE = (255, 255, 255)
 SPATIOTEMPORAL_PRICE_LEFT = (255, 92, 110)
 SPATIOTEMPORAL_PRICE_RIGHT = (80, 170, 255)
 SPATIOTEMPORAL_PRICE_FLAT = (180, 196, 214)
@@ -115,8 +115,13 @@ def _composition_rgb(x_amount: float, y_amount: float) -> tuple[int, int, int]:
         return _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["empty"])
     share_x = x / total
     y_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"])
+    mix_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["mix"])
     x_rgb = _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"])
-    return tuple(int(round(y_rgb[i] + (x_rgb[i] - y_rgb[i]) * share_x)) for i in range(3))
+    if share_x <= 0.5:
+        t = share_x * 2.0
+        return tuple(int(round(y_rgb[i] + (mix_rgb[i] - y_rgb[i]) * t)) for i in range(3))
+    t = (share_x - 0.5) * 2.0
+    return tuple(int(round(mix_rgb[i] + (x_rgb[i] - mix_rgb[i]) * t)) for i in range(3))
 
 
 def _format_price_value(price: float) -> str:
@@ -435,7 +440,7 @@ def _compose_frame_overlays(
     entries = (
         (f"{token_y} (Y)", _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["Y"])),
         (f"{token_x} (X)", _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["X"])),
-        ("mix", _composition_rgb(1.0, 1.0)),
+        ("mix", _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["mix"])),
         ("drift", SPATIOTEMPORAL_DRIFT_TRACE),
     )
     legend_x = img.width - LEGEND_RIGHT_PAD_PX
@@ -585,7 +590,7 @@ def _cap_key_rgb(
     if key == "active":
         rgb = _as_rgb_tuple(to_rgb(SPATIOTEMPORAL_ACTIVE_COLOR))
     elif key == "mix":
-        rgb = tuple(c / 255.0 for c in _composition_rgb(1.0, 1.0))
+        rgb = tuple(c / 255.0 for c in _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS["mix"]))
     else:
         rgb = tuple(c / 255.0 for c in _hex_to_rgb(SPATIOTEMPORAL_TOKEN_COLORS[key]))
     return _mute_rgb(rgb, layer_age=layer_age, background=style.background)
@@ -939,15 +944,29 @@ def _style_axes(
     pool_address: str,
     current: SnapshotTrace,
     total_traces: int,
+    history: int,
+    snapshots_per_video_sec: float,
     price_for_bin: dict[int, float] | None = None,
 ) -> None:
     ax.set_xlim(-CAP_X_EPSILON - CAP_BAR_X_EPSILON, 1.0 + CAP_X_EPSILON)
     ax.set_ylim(frame.bin_id_min, frame.bin_id_max)
     ax.set_zlim(0.0, 1.08)
 
-    ax.set_xlabel("← TIME", color=style.hud, labelpad=10, fontfamily="monospace")
-    ax.set_ylabel(f"PRICE ({token_y}/{token_x})", color=style.hud, labelpad=10, fontfamily="monospace")
+    ax.set_xlabel("← SECONDS AGO", color=style.hud, labelpad=10, fontfamily="monospace")
+    ax.set_ylabel(f"PRICE ({token_y}/{token_x})", color=style.hud, labelpad=14, fontfamily="monospace")
     ax.set_zlabel("LIQUIDITY", color=style.hud, labelpad=10, fontfamily="monospace")
+
+    seconds_per_snapshot = 1.0 / max(snapshots_per_video_sec, 1e-9)
+    history_span = max(1, history - 1)
+
+    def _format_seconds_tick(value: float, _pos: int) -> str:
+        seconds_ago = max(0.0, value) * history_span * seconds_per_snapshot
+        if seconds_ago >= 10:
+            return f"{seconds_ago:.0f}s"
+        return f"{seconds_ago:.1f}s"
+
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.xaxis.set_major_formatter(FuncFormatter(_format_seconds_tick))
 
     if price_for_bin:
         def _format_price_tick(value: float, _pos: int) -> str:
@@ -1028,6 +1047,8 @@ def render_spatiotemporal_frame(
         pool_address=pool_address,
         current=current,
         total_traces=len(traces),
+        history=history,
+        snapshots_per_video_sec=snapshots_per_video_sec,
         price_for_bin=price_for_bin,
     )
 
