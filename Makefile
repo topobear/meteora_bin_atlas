@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data clear-plots discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated temporal temporal-simulated spatiotemporal spatiotemporal-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated currency-triangle temporal temporal-simulated spatiotemporal spatiotemporal-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
 ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
@@ -78,6 +78,8 @@ help:
 	@echo "  make atlas            discover + fetch-pool + fetch-bins + normalize-bins"
 	@echo ""
 	@echo "Temporal (default pool: SOL-USDC)"
+	@echo "  make currency-triangle  materialize SOL/USDC/USDT directed probes"
+	@echo "                          WITH_JUPITER=1 uses JUPITER_API_KEY for quote samples"
 	@echo "  make fetch-data         same fetch as temporal, no MP4 (240 snaps @ 1.5Hz)"
 	@echo "                          DATASET=simulated → data/simulated (~seconds)"
 	@echo "  make fetch-data-simulated alias for fetch-data DATASET=simulated"
@@ -186,6 +188,9 @@ fetch-data:
 
 fetch-data-simulated:
 	$(MAKE) fetch-data DATASET=simulated
+
+currency-triangle:
+	npm run fetch:triangle -- $(if $(WITH_JUPITER),--with-jupiter,)
 
 temporal:
 	poetry run python -m meteora_bin_atlas.temporal.run $(TEMPORAL_ARGS) \

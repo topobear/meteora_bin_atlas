@@ -27,6 +27,7 @@ RPC defaults to Solana Foundation (no signup); bounded fetches are ~1s each. See
 
 - **GAMEPLAN Step 7** — lightweight bin-distribution metrics (`bin_metrics_*.csv`, notebook section). Next planned feature work.
 - **GAMEPLAN Steps 8+** — snapshot comparison in notebook, public artifact compression, read-only swap quotes.
+- **Currency triangle seed** — `data/triangles/sol_usdc_usdt.json` plus `make currency-triangle` materializes the first SOL/USDC/USDT routing-intelligence object.
 - **37 extra raw snapshots** in `data/raw/` from ~11:42 UTC (rapid bounded-fetch experiments, ~1s apart) — not tied to a `snapshot_series` manifest; safe to ignore or delete before the next poll.
 - **Small cleanup** — `make temporal` alias (matches `npm run temporal`); RPC/backoff comments in `.env.example`.
 
@@ -40,6 +41,11 @@ make smoke             # confirm RPC
 # Re-run temporal pipeline (faster example: ~2.5 min for 10 snapshots)
 make poll-snapshots SERIES_RPC_BACKOFF_SEC=5 SERIES_INTERVAL_SEC=10
 make render-mp4
+
+# Or seed the first currency-triangle intelligence object
+make currency-triangle
+# Optional: attach Jupiter quote samples after setting JUPITER_API_KEY
+make currency-triangle WITH_JUPITER=1
 
 # Or static single snapshot + notebook
 make atlas
@@ -136,6 +142,7 @@ notes/         Domain notes and research log
 - **Step 5** — Bin atlas normalization (`npm run normalize:bins -- --pool <ADDRESS>` → `data/processed/bin_atlas_<pool>_<timestamp>.csv`)
 - **Step 6** — Jupyter notebook (`notebooks/01_connect_fetch_explore_meteora.ipynb`)
 - **Temporal** — OHLCV + snapshot series + series CSV + MP4 (`make poll-snapshots`, `make render-mp4`; scripts `fetch:ohlcv`, `fetch:series`, `normalize:series`, `temporal`)
+- **Currency triangle** — SOL/USDC/USDT directed probes (`make currency-triangle`; optional `WITH_JUPITER=1` for Jupiter quote samples)
 - **Next (GAMEPLAN Step 7)** — Lightweight bin-distribution metrics
 
 ### Pool discovery

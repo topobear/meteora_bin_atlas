@@ -223,7 +223,10 @@ dist/
 *.tsbuildinfo
 
 # Data folder
-data/
+data/*
+!data/manual_pools.json
+!data/triangles/
+!data/triangles/*.json
 
 # Plots folder
 plots/

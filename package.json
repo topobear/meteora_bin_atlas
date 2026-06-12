@@ -12,7 +12,8 @@
     "fetch:ohlcv": "tsx src/scripts/step5_fetch_pool_ohlcv.ts",
     "fetch:series": "tsx src/scripts/step6_fetch_snapshot_series.ts",
     "normalize:series": "tsx src/scripts/step7_normalize_snapshot_series.ts",
-    "temporal": "tsx src/scripts/step8_fetch_temporal.ts"
+    "temporal": "tsx src/scripts/step8_fetch_temporal.ts",
+    "fetch:triangle": "tsx src/scripts/step9_fetch_currency_triangle.ts"
   },
   "dependencies": {
     "@meteora-ag/dlmm": "^1.5.4",
