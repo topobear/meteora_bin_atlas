@@ -277,3 +277,21 @@ render-mp4-demo: simulate-series render-mp4-simulated
 
 notebook:
 	poetry run jupyter notebook notebooks/01_connect_fetch_explore_meteora.ipynb
+
+
+
+# Codex
+.PHONY: codex-full codex-resume-full claude-full claude-resume-full
+
+codex-full:
+	codex -a never -s danger-full-access
+codex-resume-full:
+	codex resume -a never -s danger-full-access
+
+claude-full:
+# 	claude --dangerously-skip-permissions # same as bypassPermissions (!!)
+# 	slightly safe: dontAsk
+	claude --permission-mode dontAsk
+claude-resume-full:
+	claude --continue --dangerously-skip-permissions
+
