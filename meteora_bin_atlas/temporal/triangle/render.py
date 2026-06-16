@@ -283,21 +283,21 @@ def _draw_edge_price_ticker(
 
     overlay = Image.new("RGBA", strip.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay, "RGBA")
-    label_font = _load_mono_font(16)
-    price_font = _load_mono_font(34)
+    label_font = _load_mono_font(28)
+    price_font = _load_mono_font(60)
 
-    panel = [122, 18, 366, 100]
-    draw.rectangle(panel, fill=(4, 7, 12, 220), outline=(*accent, 205), width=2)
+    panel = [116, 10, 560, 164]
+    draw.rectangle(panel, fill=(4, 7, 12, 228), outline=(*accent, 220), width=3)
     center_x = (panel[0] + panel[2]) / 2
     draw.text(
-        (center_x, panel[1] + 11),
+        (center_x, panel[1] + 17),
         f"{ctx.token_y}/{ctx.token_x}",
         fill=(175, 195, 215, 245),
         font=label_font,
         anchor="ma",
     )
     draw.text(
-        (center_x, panel[1] + 36),
+        (center_x, panel[1] + 62),
         _format_edge_price(float(spot_price)),
         fill=(*accent, 255),
         font=price_font,
@@ -539,10 +539,10 @@ def _draw_triangle_frame(
             width=2,
         )
 
-    label_font = _load_mono_font(24)
-    title_font = _load_mono_font(28)
-    hud_font = _load_mono_font(18)
-    edge_label_font = _load_mono_font(36)
+    label_font = _load_mono_font(42)
+    title_font = _load_mono_font(44)
+    hud_font = _load_mono_font(30)
+    edge_label_font = _load_mono_font(68)
 
     for symbol, point in vertices.items():
         draw.ellipse(
@@ -571,7 +571,7 @@ def _draw_triangle_frame(
         lb = draw.textbbox((0, 0), leg_label, font=edge_label_font)
         lw = lb[2] - lb[0]
         lh = lb[3] - lb[1]
-        pad_x, pad_y = 11, 6
+        pad_x, pad_y = 24, 14
         panel = [
             lx - lw / 2 - pad_x,
             ly - lh / 2 - pad_y,
@@ -581,8 +581,8 @@ def _draw_triangle_frame(
         draw.rectangle(
             panel,
             fill=(0, 0, 0, 180),
-            outline=(170, 195, 220, 150),
-            width=1,
+            outline=(170, 195, 220, 185),
+            width=2,
         )
         draw.text(
             (lx - lw / 2, ly - lh / 2),
@@ -596,7 +596,7 @@ def _draw_triangle_frame(
         title += f" (fallback from {spec.fallback_from})"
     draw.text((36, 24), title, fill=(190, 210, 230, 255), font=title_font)
     draw.text(
-        (36, 58),
+        (36, 84),
         f"FRAME {current_index + 1}/{n_frames}",
         fill=(175, 195, 215, 230),
         font=hud_font,

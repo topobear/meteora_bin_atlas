@@ -778,14 +778,14 @@ def _draw_drift_seismograph(
 
     # Bold all-caps DRIFT header (double-struck for weight); the spot headline
     # ticker sits just above it.
-    label_font = _load_mono_font(20)
-    label_xy = (strip_left - 2, top - 24)
+    label_font = _load_mono_font(36)
+    label_xy = (strip_left - 2, top - 44)
     for dx in (0, 1):
         draw.text((label_xy[0] + dx, label_xy[1]), "DRIFT", fill=(235, 246, 255, 255), font=label_font)
 
     if time_label_step_sec is not None and time_label_step_sec > 0:
-        tick_font = _load_mono_font(8)
-        tick_rgb = (150, 168, 188, 210)
+        tick_font = _load_mono_font(16)
+        tick_rgb = (178, 202, 226, 238)
 
         def _tick_width(text: str) -> int:
             if hasattr(draw, "textlength"):
@@ -806,7 +806,7 @@ def _draw_drift_seismograph(
             label = f"T-{int(age_sec)}"
             y = y_for(n - snap_age)
             draw.text(
-                (strip_left, y - 4),
+                (strip_left, y - 9),
                 label,
                 fill=tick_rgb,
                 font=tick_font,
@@ -831,8 +831,8 @@ def _draw_price_ticker(
     label_text = f"{token_y}/{token_x}"
     price_text = f"{spot_price:,.2f}"
 
-    label_font = _load_mono_font(13)
-    price_font = _load_mono_font(30)
+    label_font = _load_mono_font(22)
+    price_font = _load_mono_font(50)
 
     up = prev_price is None or spot_price >= prev_price
     accent = (60, 230, 150) if up else (255, 92, 110)
@@ -842,7 +842,7 @@ def _draw_price_ticker(
 
     left_x = DRIFT_STRIP_LEFT - 3
     label_y = 3
-    price_y = 17
+    price_y = 30
     content_w = max(label_bbox[2], price_bbox[2])
     panel = [left_x - 2, 1, left_x + content_w + 8, price_y + price_bbox[3] + 4]
     draw.rectangle(panel, fill=(8, 12, 18, 180), outline=(*accent, 160))
