@@ -36,7 +36,7 @@ TRIANGLE_STRIP_EDGE_GAP = 8
 LEG_LABEL_OFFSET = 98
 
 TRIANGLE_TOKEN_COLORS = {
-    "X": "#FF335C",
+    "X": "#FF9A24",
     "Y": "#3BA7FF",
     "mix": "#E8F4FF",
     "empty": "#000000",
@@ -53,6 +53,9 @@ TRIANGLE_MIN_DISPLAY_BINS = 12
 TRIANGLE_VIEWPORT_EDGE_BAND = 4
 TRIANGLE_ZOOM_IN_RATIO = 0.44
 TRIANGLE_ROLLING_SNAPSHOTS = 3
+TRIANGLE_LANDSCAPE_STEP = 30
+TRIANGLE_LANDSCAPE_ALPHA = 78
+TRIANGLE_LANDSCAPE_RIDGE_ALPHA = 150
 
 
 def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
@@ -207,7 +210,7 @@ def _render_leg_strip(
         frame=display_frame,
         current_index=current_index,
         transition_blend=1.0,
-        ghost_indices=ghost_indices,
+        ghost_indices=[],
         liquidity_scale=ctx.liquidity_scale * TRIANGLE_LIQUIDITY_SCALE_HEADROOM,
         drift_window=drift_window,
         token_x=ctx.token_x,
@@ -224,10 +227,133 @@ def _render_leg_strip(
         highlight_active_bin=False,
         active_bin_neighbor_cap=TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP,
         left_drift_color=(59, 167, 255),
-        right_drift_color=(255, 51, 92),
+        right_drift_color=(255, 154, 36),
     )
     image = Image.fromarray(rgba, mode="RGBA")
-    return image.crop(_plot_crop_box(width, height))
+    strip = image.crop(_plot_crop_box(width, height))
+    _draw_edge_landscape_trail(
+        strip,
+        ctx=ctx,
+        current_index=current_index,
+        display_frame=display_frame,
+        ghost_indices=ghost_indices,
+    )
+    return strip
+
+
+def _strip_bin_geometry(strip: Image.Image, frame: GlobalFrame) -> tuple[float, float, float]:
+    # After cropping, the seismic plot starts just to the right of the drift panel.
+    plot_left = 112.0
+    plot_right = float(strip.width)
+    cell_w = (plot_right - plot_left) / max(1, frame.n_bins)
+    return plot_left, plot_right, cell_w
+
+
+def _strip_bin_color(bin_id: int, active_id: int) -> tuple[int, int, int]:
+    if bin_id < active_id:
+        return (59, 167, 255)
+    if bin_id > active_id:
+        return (255, 154, 36)
+    return (232, 244, 255)
+
+
+def _trace_landscape_segments(
+    ctx: LegRenderContext,
+    *,
+    trace_index: int,
+    slot: int,
+    frame: GlobalFrame,
+    strip: Image.Image,
+) -> list[tuple[float, float, float, float, tuple[int, int, int]]]:
+    trace = ctx.traces[trace_index]
+    plot_left, _plot_right, cell_w = _strip_bin_geometry(strip, frame)
+    base_y = strip.height - 4 - slot * TRIANGLE_LANDSCAPE_STEP
+    max_deflection = strip.height * TRIANGLE_DEFLECTION_RATIO
+    liquidity_scale = ctx.liquidity_scale * TRIANGLE_LIQUIDITY_SCALE_HEADROOM
+    segments: list[tuple[float, float, float, float, tuple[int, int, int]]] = []
+
+    for bin_id, liquidity in zip(trace.bin_ids, trace.liquidity, strict=True):
+        bin_id = int(bin_id)
+        if bin_id < frame.bin_id_min or bin_id > frame.bin_id_max:
+            continue
+        if float(liquidity) <= 0:
+            continue
+        x_left = plot_left + (bin_id - frame.bin_id_min) * cell_w
+        x_right = x_left + cell_w
+        peak_y = base_y - (float(liquidity) / liquidity_scale) * max_deflection
+        color = _strip_bin_color(bin_id, int(trace.active_bin_id))
+        segments.append((x_left, x_right, base_y, peak_y, color))
+    return segments
+
+
+def _draw_edge_landscape_trail(
+    strip: Image.Image,
+    *,
+    ctx: LegRenderContext,
+    current_index: int,
+    display_frame: GlobalFrame,
+    ghost_indices: list[int],
+) -> None:
+    history = [idx for idx in ghost_indices[-GHOST_HISTORY:] if idx < current_index]
+    if not history:
+        return
+
+    draw = ImageDraw.Draw(strip, "RGBA")
+    plot_left, plot_right, _cell_w = _strip_bin_geometry(strip, display_frame)
+    rows: list[tuple[int, int, list[tuple[float, float, float, float, tuple[int, int, int]]]]] = []
+    ordered = list(reversed(history))
+    for slot, trace_index in enumerate(ordered, start=1):
+        segments = _trace_landscape_segments(
+            ctx,
+            trace_index=trace_index,
+            slot=slot,
+            frame=display_frame,
+            strip=strip,
+        )
+        if segments:
+            rows.append((slot, trace_index, segments))
+
+    for slot, _trace_index, segments in reversed(rows):
+        lane_y = strip.height - 4 - slot * TRIANGLE_LANDSCAPE_STEP
+        lane_alpha = max(16, int(56 * (0.88 ** slot)))
+        draw.line(
+            [(plot_left, lane_y), (plot_right, lane_y)],
+            fill=(150, 170, 195, lane_alpha),
+            width=1,
+        )
+
+        fill_alpha = max(18, int(TRIANGLE_LANDSCAPE_ALPHA * (0.88 ** slot)))
+        ridge_alpha = max(34, int(TRIANGLE_LANDSCAPE_RIDGE_ALPHA * (0.90 ** slot)))
+        ridge_points: list[tuple[float, float]] = []
+        for x_left, x_right, base_y, peak_y, color in segments:
+            draw.rectangle(
+                [x_left, peak_y, x_right, base_y],
+                fill=(*color, fill_alpha),
+            )
+            ridge_points.append(((x_left + x_right) / 2, peak_y))
+        if len(ridge_points) >= 2:
+            draw.line(
+                ridge_points,
+                fill=(232, 244, 255, ridge_alpha),
+                width=2,
+                joint="curve",
+            )
+
+    # Stitch adjacent history slices so the eye reads a surface, not isolated bars.
+    for (slot_a, _idx_a, segs_a), (slot_b, _idx_b, segs_b) in zip(rows, rows[1:], strict=False):
+        _ = slot_a, slot_b
+        by_bin_b = {round((x_left + x_right) / 2, 2): (x_left, x_right, base_y, peak_y, color)
+                    for x_left, x_right, base_y, peak_y, color in segs_b}
+        for x_left, x_right, _base_y, peak_y, color in segs_a:
+            key = round((x_left + x_right) / 2, 2)
+            other = by_bin_b.get(key)
+            if other is None:
+                continue
+            ox_left, ox_right, _obase_y, opeak_y, _ocolor = other
+            draw.polygon(
+                [(x_left, peak_y), (x_right, peak_y), (ox_right, opeak_y), (ox_left, opeak_y)],
+                fill=(*color, 24),
+            )
 
 
 def _scale_strip_to_edge(strip: Image.Image, edge_length: float) -> Image.Image:
