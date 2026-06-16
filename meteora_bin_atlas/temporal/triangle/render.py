@@ -24,11 +24,27 @@ from meteora_bin_atlas.temporal.seismic import (
 )
 from meteora_bin_atlas.temporal.triangle.resolve import TriangleLeg, TriangleSpec
 
-TRIANGLE_WIDTH = 1800
-TRIANGLE_HEIGHT = 1600
-LEG_STRIP_WIDTH = 900
-LEG_STRIP_HEIGHT = 180
-TRIANGLE_RADIUS = 520
+# Leg strips render at the same pixel density as make temporal, then scale to each edge.
+DEFAULT_LEG_DPI = 150
+TRIANGLE_WIDTH = 2600
+TRIANGLE_HEIGHT = 2400
+TRIANGLE_RADIUS = 580
+LEG_LABEL_OFFSET = 32
+
+# Tighter than single-pool temporal: shorter liquidity pyramids, narrower bin viewport.
+TRIANGLE_DEFLECTION_RATIO = 0.48
+TRIANGLE_LIQUIDITY_SCALE_HEADROOM = 1.4
+TRIANGLE_DRIFT_HEADROOM = 1.55
+TRIANGLE_DISPLAY_PAD_BINS = 2
+TRIANGLE_MIN_DISPLAY_BINS = 14
+TRIANGLE_VIEWPORT_EDGE_BAND = 6
+TRIANGLE_ZOOM_IN_RATIO = 0.52
+TRIANGLE_ROLLING_SNAPSHOTS = 3
+
+
+def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
+    """Match make temporal: 14×8 inches at the given DPI."""
+    return int(14 * dpi), int(8 * dpi)
 
 
 @dataclass(frozen=True)
@@ -62,7 +78,7 @@ def _triangle_vertices(
     radius: float,
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     cx = width / 2
-    cy = height / 2 + radius * 0.08
+    cy = height / 2 + radius * 0.06
     top = (cx, cy - radius)
     bottom_left = (cx - radius * math.sqrt(3) / 2, cy + radius / 2)
     bottom_right = (cx + radius * math.sqrt(3) / 2, cy + radius / 2)
@@ -76,7 +92,6 @@ def _vertex_for_symbol(spec: TriangleSpec) -> dict[str, tuple[float, float]]:
         TRIANGLE_RADIUS,
     )
     symbols = [t.symbol for t in spec.tokens]
-    # Layout: first token top, second bottom-left, third bottom-right.
     return {
         symbols[0]: top,
         symbols[1]: bottom_left,
@@ -89,6 +104,31 @@ def _edge_angle_deg(
     end: tuple[float, float],
 ) -> float:
     return math.degrees(math.atan2(end[1] - start[1], end[0] - start[0]))
+
+
+def _triangle_centroid(points: list[tuple[float, float]]) -> tuple[float, float]:
+    return (
+        sum(p[0] for p in points) / len(points),
+        sum(p[1] for p in points) / len(points),
+    )
+
+
+def _outward_label_point(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    *,
+    centroid: tuple[float, float],
+    offset: float,
+) -> tuple[float, float]:
+    mid_x = (start[0] + end[0]) / 2
+    mid_y = (start[1] + end[1]) / 2
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy / length, dx / length
+    if (centroid[0] - mid_x) * nx + (centroid[1] - mid_y) * ny > 0:
+        nx, ny = -nx, -ny
+    return mid_x + nx * offset, mid_y + ny * offset
 
 
 def _prepare_leg_context(
@@ -128,25 +168,39 @@ def _render_leg_strip(
     display_frame: GlobalFrame,
     ghost_indices: list[int],
     drift_window: int,
+    dpi: int,
 ) -> Image.Image:
-    rgb = render_seismic_frame(
+    width, height = _leg_strip_dimensions(dpi)
+    rgba = render_seismic_frame(
         ctx.traces,
         frame=display_frame,
         current_index=current_index,
         transition_blend=1.0,
         ghost_indices=ghost_indices,
-        liquidity_scale=ctx.liquidity_scale,
+        liquidity_scale=ctx.liquidity_scale * TRIANGLE_LIQUIDITY_SCALE_HEADROOM,
         drift_window=drift_window,
         token_x=ctx.token_x,
         token_y=ctx.token_y,
         pool_address=ctx.leg.pool_address,
         price_for_bin=ctx.price_for_bin,
-        width=LEG_STRIP_WIDTH,
-        height=LEG_STRIP_HEIGHT,
-        show_drift_strip=False,
-        compact_hud=True,
+        width=width,
+        height=height,
+        edge_strip=True,
+        deflection_ratio=TRIANGLE_DEFLECTION_RATIO,
+        drift_headroom=TRIANGLE_DRIFT_HEADROOM,
     )
-    return Image.fromarray(rgb)
+    return Image.fromarray(rgba, mode="RGBA")
+
+
+def _scale_strip_to_edge(strip: Image.Image, edge_length: float) -> Image.Image:
+    """Down/up-scale the native temporal-resolution strip to fit the triangle edge."""
+    if strip.width <= 0:
+        return strip
+    scale = edge_length / strip.width
+    if abs(scale - 1.0) < 1e-3:
+        return strip
+    new_size = (max(1, int(round(strip.width * scale))), max(1, int(round(strip.height * scale))))
+    return strip.resize(new_size, Image.Resampling.LANCZOS)
 
 
 def _paste_strip_on_edge(
@@ -156,13 +210,20 @@ def _paste_strip_on_edge(
     start: tuple[float, float],
     end: tuple[float, float],
 ) -> None:
+    edge_length = math.hypot(end[0] - start[0], end[1] - start[1])
+    strip_rgba = _scale_strip_to_edge(strip.convert("RGBA"), edge_length)
     angle = _edge_angle_deg(start, end)
-    rotated = strip.rotate(-angle, resample=Image.Resampling.BICUBIC, expand=True)
+    rotated = strip_rgba.rotate(
+        -angle,
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=(0, 0, 0, 0),
+    )
     mid_x = (start[0] + end[0]) / 2
     mid_y = (start[1] + end[1]) / 2
     paste_x = int(mid_x - rotated.width / 2)
     paste_y = int(mid_y - rotated.height / 2)
-    canvas.paste(rotated, (paste_x, paste_y), rotated if rotated.mode == "RGBA" else None)
+    canvas.paste(rotated, (paste_x, paste_y), rotated)
 
 
 def _draw_triangle_frame(
@@ -173,15 +234,57 @@ def _draw_triangle_frame(
     display_frames: list[GlobalFrame | None],
     prior_indices: list[list[int]],
     drift_window: int,
+    dpi: int,
 ) -> np.ndarray:
     canvas = Image.new("RGBA", (TRIANGLE_WIDTH, TRIANGLE_HEIGHT), (0, 0, 0, 255))
-    draw = ImageDraw.Draw(canvas, "RGBA")
     vertices = _vertex_for_symbol(spec)
     vertex_points = [vertices[t.symbol] for t in spec.tokens]
-    draw.polygon(vertex_points, outline=(80, 100, 120, 220), fill=(8, 12, 18, 255))
+    centroid = _triangle_centroid(vertex_points)
 
+    n_frames = min(len(ctx.traces) for ctx in leg_contexts)
+    current_index = min(frame_index, n_frames - 1)
+
+    leg_strips: list[tuple[LegRenderContext, Image.Image, tuple[float, float], tuple[float, float]]] = []
+    for leg_idx, ctx in enumerate(leg_contexts):
+        display_frames[leg_idx] = compute_display_frame(
+            ctx.traces,
+            current_index,
+            display_frames[leg_idx],
+            atlas=ctx.atlas_frame,
+            pad_bins=TRIANGLE_DISPLAY_PAD_BINS,
+            min_display_bins=TRIANGLE_MIN_DISPLAY_BINS,
+            viewport_edge_band=TRIANGLE_VIEWPORT_EDGE_BAND,
+            rolling_snapshots=TRIANGLE_ROLLING_SNAPSHOTS,
+            zoom_in_ratio=TRIANGLE_ZOOM_IN_RATIO,
+        )
+        ghost_indices = prior_indices[leg_idx][-GHOST_HISTORY:]
+        strip = _render_leg_strip(
+            ctx,
+            current_index=current_index,
+            display_frame=display_frames[leg_idx],  # type: ignore[arg-type]
+            ghost_indices=ghost_indices,
+            drift_window=drift_window,
+            dpi=dpi,
+        )
+        start = vertices[ctx.leg.token_a]
+        end = vertices[ctx.leg.token_b]
+        leg_strips.append((ctx, strip, start, end))
+        prior_indices[leg_idx].append(current_index)
+
+    for _ctx, strip, start, end in leg_strips:
+        _paste_strip_on_edge(canvas, strip, start=start, end=end)
+
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    draw.polygon(vertex_points, outline=(100, 130, 160, 240), fill=None)
+    for i in range(3):
+        draw.line(
+            [vertex_points[i], vertex_points[(i + 1) % 3]],
+            fill=(100, 130, 160, 200),
+            width=2,
+        )
+
+    label_font = _load_mono_font(20)
     title_font = _load_mono_font(28)
-    label_font = _load_mono_font(22)
     hud_font = _load_mono_font(18)
 
     for symbol, point in vertices.items():
@@ -194,45 +297,27 @@ def _draw_triangle_frame(
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
         draw.text(
-            (point[0] - tw / 2, point[1] - th - 16),
+            (point[0] - tw / 2, point[1] - th - 18),
             symbol,
             fill=(232, 244, 255, 255),
             font=label_font,
         )
 
-    n_frames = min(len(ctx.traces) for ctx in leg_contexts)
-    current_index = min(frame_index, n_frames - 1)
-
-    for leg_idx, ctx in enumerate(leg_contexts):
-        display_frames[leg_idx] = compute_display_frame(
-            ctx.traces,
-            current_index,
-            display_frames[leg_idx],
-            atlas=ctx.atlas_frame,
-        )
-        ghost_indices = prior_indices[leg_idx][-GHOST_HISTORY:]
-        strip = _render_leg_strip(
-            ctx,
-            current_index=current_index,
-            display_frame=display_frames[leg_idx],  # type: ignore[arg-type]
-            ghost_indices=ghost_indices,
-            drift_window=drift_window,
-        )
-
-        start = vertices[ctx.leg.token_a]
-        end = vertices[ctx.leg.token_b]
-        _paste_strip_on_edge(canvas, strip, start=start, end=end)
-        prior_indices[leg_idx].append(current_index)
-
-        mid_x = (start[0] + end[0]) / 2
-        mid_y = (start[1] + end[1]) / 2
+    for ctx, _strip, start, end in leg_strips:
         leg_label = f"{ctx.leg.token_a}/{ctx.leg.token_b}"
+        lx, ly = _outward_label_point(
+            start,
+            end,
+            centroid=centroid,
+            offset=LEG_LABEL_OFFSET,
+        )
         lb = draw.textbbox((0, 0), leg_label, font=hud_font)
         lw = lb[2] - lb[0]
+        lh = lb[3] - lb[1]
         draw.text(
-            (mid_x - lw / 2, mid_y - 8),
+            (lx - lw / 2, ly - lh / 2),
             leg_label,
-            fill=(190, 210, 230, 200),
+            fill=(190, 210, 230, 220),
             font=hud_font,
         )
 
@@ -258,10 +343,9 @@ def build_triangle_temporal_mp4(
     fps: int = 24,
     processed_dir: Path = DATA_PROCESSED,
     zoom_bins: int = 30,
-    dpi: int = 150,
+    dpi: int = DEFAULT_LEG_DPI,
 ) -> Path:
     """Build a triangle composite MP4 from three leg series CSVs."""
-    _ = dpi
     if len(spec.legs) != 3 or len(leg_csv_paths) != 3:
         raise ValueError("Triangle render requires exactly three legs and three CSV paths")
 
@@ -292,6 +376,7 @@ def build_triangle_temporal_mp4(
                 display_frames=display_frames,
                 prior_indices=prior_indices,
                 drift_window=drift_window,
+                dpi=dpi,
             )
         )
 

@@ -640,6 +640,7 @@ def _draw_drift_seismograph(
     window: int = DRIFT_WINDOW,
     strip_left: int = DRIFT_STRIP_LEFT,
     strip_right: int = DRIFT_STRIP_RIGHT,
+    drift_headroom: float | None = None,
     time_label_step_sec: float | None = None,
     snapshots_per_video_sec: float = 1.0,
     left_drift_color: tuple[int, int, int] | None = None,
@@ -673,7 +674,7 @@ def _draw_drift_seismograph(
     drift = active_ids - rolling_centre
     # Headroom keeps the widest swing off the edge; as drift grows the whole
     # trace zooms out horizontally to stay inside the strip with a margin.
-    max_abs = float(np.max(np.abs(drift))) * DRIFT_HEADROOM
+    max_abs = float(np.max(np.abs(drift))) * (drift_headroom if drift_headroom is not None else DRIFT_HEADROOM)
     if max_abs <= 0:
         max_abs = 1.0
 
@@ -823,13 +824,21 @@ def render_seismic_frame(
     style: SeismicStyle = SeismicStyle(),
     show_drift_strip: bool = True,
     compact_hud: bool = False,
+    edge_strip: bool = False,
+    deflection_ratio: float | None = None,
+    drift_headroom: float | None = None,
 ) -> np.ndarray:
     """Render the blackboard with a viewport recentered on the active bin marker."""
     _ = zoom_bins
     current_index = max(0, min(current_index, len(traces) - 1))
     total_traces = len(traces)
 
-    img = Image.new("RGBA", (width, height), style.background + (255,))
+    if edge_strip:
+        show_drift_strip = True
+        compact_hud = False
+
+    canvas_bg = (0, 0, 0, 0) if edge_strip else style.background + (255,)
+    img = Image.new("RGBA", (width, height), canvas_bg)
     plot_left = DRIFT_STRIP_RIGHT + 8 if show_drift_strip else 20
     plot_top = 48 if compact_hud else 82
     plot_box = (plot_left, plot_top, width - 12, height - (36 if compact_hud else 76))
@@ -854,7 +863,7 @@ def render_seismic_frame(
         label_font=grid_label_font,
     )
 
-    max_deflection = (bottom - top) * CURRENT_DEFLECTION_RATIO
+    max_deflection = (bottom - top) * (deflection_ratio if deflection_ratio is not None else CURRENT_DEFLECTION_RATIO)
     ghost_layers = _resolve_ghost_layers(current_index, ghost_indices)
 
     for layer_index, layer_age in ghost_layers:
@@ -881,6 +890,7 @@ def render_seismic_frame(
             plot_box=plot_box,
             style=style,
             window=drift_window,
+            drift_headroom=drift_headroom,
         )
 
     channel_x = (DRIFT_STRIP_RIGHT + 8) if show_drift_strip else (left + 4)
@@ -925,16 +935,18 @@ def render_seismic_frame(
     if compact_hud:
         title = f"{token_x}/{token_y}"
         subtitle = f"SNAP {current.snapshot_index + 1}/{total_traces}"
-        title_font = _load_mono_font(18)
-        subtitle_font = _load_mono_font(14)
+        compact_title_font = _load_mono_font(18)
+        compact_subtitle_font = _load_mono_font(14)
+        draw.text((left, 8), title, fill=style.hud, font=compact_title_font)
+        draw.text((left, 26), subtitle, fill=(*style.hud[:3], 240), font=compact_subtitle_font)
     else:
         title = "DLMM SEISMOGRAM"
         subtitle = (
             f"{token_x}/{token_y} | {pool_address[:6]}...{pool_address[-4:]} | "
             f"SNAP {current.snapshot_index + 1}/{total_traces} | {current.fetched_label}"
         )
-    draw.text((left, 8 if compact_hud else 13), title, fill=style.hud, font=title_font)
-    draw.text((left, 26 if compact_hud else 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
+        draw.text((left, 13), title, fill=style.hud, font=title_font)
+        draw.text((left, 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
 
     if price_for_bin and not compact_hud:
         spot_price = price_for_bin.get(int(current.active_bin_id))
@@ -980,6 +992,8 @@ def render_seismic_frame(
             font=legend_font,
         )
 
+    if edge_strip:
+        return np.asarray(img)
     return np.asarray(img.convert("RGB"))
 
 
