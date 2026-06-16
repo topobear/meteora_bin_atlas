@@ -1,0 +1,32 @@
+{
+  "id": "sol_usdc_usdt",
+  "tokens": [
+    {
+      "symbol": "SOL",
+      "mint": "So11111111111111111111111111111111111111112"
+    },
+    {
+      "symbol": "USDC",
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    },
+    {
+      "symbol": "USDT",
+      "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    }
+  ],
+  "leg_pools": {
+    "SOL-USDC": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+    "USDC-USDT": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq"
+  },
+  "fallback_id": "sol_usdc_cbtbtc",
+  "leg_mints": {
+    "SOL-USDC": {
+      "token_x_mint": "So11111111111111111111111111111111111111112",
+      "token_y_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    },
+    "USDC-USDT": {
+      "token_x_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "token_y_mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    }
+  }
+}

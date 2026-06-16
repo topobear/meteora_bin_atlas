@@ -6,7 +6,14 @@ This is not a trading bot, dashboard, Solana indexer, or production analytics pr
 
 ## Current status
 
-*Paused 2026-06-07 · branch `2026-06-07-nwqg` · example pool SOL-USDC (`5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6`)*
+2026-06-26
+- starting currency triangle viz using the 2d teporal animation
+    - the idea is that the 2d temporal animation is not very exciting (relatively infrequent events)
+    - BUT if we do the triangle, the multivariate point process of events between them will be more exciting, and also more useful (detect arbitrage)
+- plus it's cool to actually visualize the triangle
+- note: simulation should have a joint forward kolmogorov with mean reversion so that the cross-pool movements represent only small arbitrage opportunities + random steady-state Ornstein-Uhlenbeck drift
+- this opens the door to cross-pool trajectories too (potential arbitrage paths?)
+    - however, need to account for feeds etc.
 
 ### Working end-to-end
 
@@ -143,7 +150,8 @@ notes/         Domain notes and research log
 - **Step 5** — Bin atlas normalization (`npm run normalize:bins -- --pool <ADDRESS>` → `data/processed/bin_atlas_<pool>_<timestamp>.csv`)
 - **Step 6** — Jupyter notebook (`notebooks/01_connect_fetch_explore_meteora.ipynb`)
 - **Temporal** — OHLCV + snapshot series + series CSV + MP4 (`make poll-snapshots`, `make render-mp4`; scripts `fetch:ohlcv`, `fetch:series`, `normalize:series`, `temporal`)
-- **Currency triangle** — SOL/USDC/USDT directed probes (`make currency-triangle`; optional `WITH_JUPITER=1` for Jupiter quote samples)
+- **Triangle temporal** — interleaved fetch of three DLMM legs + composite triangle MP4 (`make triangle-temporal`; default SOL/USDC/WETH with USDT fallback; `TRIANGLE=sol_usdc_usdt` to force preset)
+- **Currency triangle** — SOL/USDC/USDT directed probes (`make currency-triangle`; optional `WITH_JUPITER=1` for Jupiter quote samples; fetch script may be absent — see GAMEPLAN Step 11)
 - **Next (GAMEPLAN Step 7)** — Lightweight bin-distribution metrics
 
 ### Pool discovery
@@ -215,6 +223,7 @@ Or fetch + render in one shot:
 make temporal          # 240 snaps → ~10s MP4 @ 24fps
 make timelapse         # longer subsampled version
 make spatiotemporal    # 3D bin × time × liquidity view
+make triangle-temporal # 3 legs interleaved → triangle MP4 (SOL/USDC/WETH)
 ```
 
 **Simulated** — no RPC:
@@ -236,6 +245,7 @@ Or full-pipeline aliases:
 make temporal-simulated
 make timelapse-simulated
 make spatiotemporal-simulated
+make triangle-temporal-simulated
 ```
 
 **Compare dynamics (text report, not video):**

@@ -821,6 +821,8 @@ def render_seismic_frame(
     width: int = 1400,
     height: int = 800,
     style: SeismicStyle = SeismicStyle(),
+    show_drift_strip: bool = True,
+    compact_hud: bool = False,
 ) -> np.ndarray:
     """Render the blackboard with a viewport recentered on the active bin marker."""
     _ = zoom_bins
@@ -828,7 +830,9 @@ def render_seismic_frame(
     total_traces = len(traces)
 
     img = Image.new("RGBA", (width, height), style.background + (255,))
-    plot_box = (176, 82, width - 20, height - 76)
+    plot_left = DRIFT_STRIP_RIGHT + 8 if show_drift_strip else 20
+    plot_top = 48 if compact_hud else 82
+    plot_box = (plot_left, plot_top, width - 12, height - (36 if compact_hud else 76))
     left, top, right, bottom = plot_box
     plot_bg = Image.fromarray(_plot_background(right - left, bottom - top), mode="RGB")
     img.paste(plot_bg, (left, top))
@@ -869,60 +873,70 @@ def render_seismic_frame(
             layer_age=layer_age,
         )
 
-    _draw_drift_seismograph(
-        draw,
-        traces=traces,
-        current_index=current_index,
-        plot_box=plot_box,
-        style=style,
-        window=drift_window,
-    )
-
-    channel_x = DRIFT_STRIP_RIGHT + 8
-    for layer_index, layer_age in ghost_layers:
-        layer_trace_y = trace_y - layer_age * GHOST_TRACE_Y_OFFSET
-        label = "NOW" if layer_age == 0 else f"T-{layer_age}"
-        alpha = 220 if layer_age == 0 else max(50, int(180 * (GHOST_OUTLINE_DECAY**layer_age)))
-        draw.text(
-            (channel_x, layer_trace_y - 14),
-            label,
-            fill=(*_trace_outline_rgb(layer_age), alpha),
-            font=channel_font,
+    if show_drift_strip:
+        _draw_drift_seismograph(
+            draw,
+            traces=traces,
+            current_index=current_index,
+            plot_box=plot_box,
+            style=style,
+            window=drift_window,
         )
 
-    legend_x = right - 230
-    legend_y = top + 26
+    channel_x = (DRIFT_STRIP_RIGHT + 8) if show_drift_strip else (left + 4)
+    if not compact_hud:
+        for layer_index, layer_age in ghost_layers:
+            layer_trace_y = trace_y - layer_age * GHOST_TRACE_Y_OFFSET
+            label = "NOW" if layer_age == 0 else f"T-{layer_age}"
+            alpha = 220 if layer_age == 0 else max(50, int(180 * (GHOST_OUTLINE_DECAY**layer_age)))
+            draw.text(
+                (channel_x, layer_trace_y - 14),
+                label,
+                fill=(*_trace_outline_rgb(layer_age), alpha),
+                font=channel_font,
+            )
+
+    legend_x = right - (120 if compact_hud else 230)
+    legend_y = top + (8 if compact_hud else 26)
 
     current = traces[current_index]
-    _draw_active_bin_marker(
-        draw,
-        active_bin_id=current.active_bin_id,
-        frame=frame,
-        plot_box=plot_box,
-        style=style,
-        font=hud_font,
-        label_y=legend_y,
-    )
+    if not compact_hud:
+        _draw_active_bin_marker(
+            draw,
+            active_bin_id=current.active_bin_id,
+            frame=frame,
+            plot_box=plot_box,
+            style=style,
+            font=hud_font,
+            label_y=legend_y,
+        )
 
-    axis_y = height - 62
-    draw.text((left, axis_y), str(frame.bin_id_min), fill=style.hud, font=hud_font)
-    draw.text((right - 80, axis_y), str(frame.bin_id_max), fill=style.hud, font=hud_font)
-    draw.text(
-        (left + (right - left) / 2 - 110, axis_y),
-        "BIN ID · GLOBAL LATTICE",
-        fill=style.hud,
-        font=hud_font,
-    )
+    axis_y = height - (28 if compact_hud else 62)
+    if not compact_hud:
+        draw.text((left, axis_y), str(frame.bin_id_min), fill=style.hud, font=hud_font)
+        draw.text((right - 80, axis_y), str(frame.bin_id_max), fill=style.hud, font=hud_font)
+        draw.text(
+            (left + (right - left) / 2 - 110, axis_y),
+            "BIN ID · GLOBAL LATTICE",
+            fill=style.hud,
+            font=hud_font,
+        )
 
-    title = "DLMM SEISMOGRAM"
-    subtitle = (
-        f"{token_x}/{token_y} | {pool_address[:6]}...{pool_address[-4:]} | "
-        f"SNAP {current.snapshot_index + 1}/{total_traces} | {current.fetched_label}"
-    )
-    draw.text((left, 13), title, fill=style.hud, font=title_font)
-    draw.text((left, 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
+    if compact_hud:
+        title = f"{token_x}/{token_y}"
+        subtitle = f"SNAP {current.snapshot_index + 1}/{total_traces}"
+        title_font = _load_mono_font(18)
+        subtitle_font = _load_mono_font(14)
+    else:
+        title = "DLMM SEISMOGRAM"
+        subtitle = (
+            f"{token_x}/{token_y} | {pool_address[:6]}...{pool_address[-4:]} | "
+            f"SNAP {current.snapshot_index + 1}/{total_traces} | {current.fetched_label}"
+        )
+    draw.text((left, 8 if compact_hud else 13), title, fill=style.hud, font=title_font)
+    draw.text((left, 26 if compact_hud else 38), subtitle, fill=(*style.hud[:3], 240), font=subtitle_font)
 
-    if price_for_bin:
+    if price_for_bin and not compact_hud:
         spot_price = price_for_bin.get(int(current.active_bin_id))
         prev_price = (
             price_for_bin.get(int(traces[current_index - 1].active_bin_id))
@@ -940,30 +954,31 @@ def render_seismic_frame(
 
     legend_font = channel_font
     legend_line = int(CHANNEL_FONT_SIZE * 1.3)
-    draw.text(
-        (legend_x, legend_y),
-        f"| {token_y} (Y)",
-        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["Y"], layer_age=0), 240),
-        font=legend_font,
-    )
-    draw.text(
-        (legend_x, legend_y + legend_line),
-        f"| {token_x} (X)",
-        fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 240),
-        font=legend_font,
-    )
-    draw.text(
-        (legend_x, legend_y + 2 * legend_line),
-        f"| {token_x}+{token_y} (mix)",
-        fill=(*_composition_rgb(1.0, 1.0), 240),
-        font=legend_font,
-    )
-    draw.text(
-        (legend_x, legend_y + 3 * legend_line),
-        "| ACTIVE",
-        fill=(*_hex_to_rgb(SEISMIC_ACTIVE_COLOR), 255),
-        font=legend_font,
-    )
+    if not compact_hud:
+        draw.text(
+            (legend_x, legend_y),
+            f"| {token_y} (Y)",
+            fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["Y"], layer_age=0), 240),
+            font=legend_font,
+        )
+        draw.text(
+            (legend_x, legend_y + legend_line),
+            f"| {token_x} (X)",
+            fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 240),
+            font=legend_font,
+        )
+        draw.text(
+            (legend_x, legend_y + 2 * legend_line),
+            f"| {token_x}+{token_y} (mix)",
+            fill=(*_composition_rgb(1.0, 1.0), 240),
+            font=legend_font,
+        )
+        draw.text(
+            (legend_x, legend_y + 3 * legend_line),
+            "| ACTIVE",
+            fill=(*_hex_to_rgb(SEISMIC_ACTIVE_COLOR), 255),
+            font=legend_font,
+        )
 
     return np.asarray(img.convert("RGB"))
 

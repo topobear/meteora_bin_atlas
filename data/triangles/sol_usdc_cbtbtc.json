@@ -1,0 +1,32 @@
+{
+  "id": "sol_usdc_cbtbtc",
+  "tokens": [
+    {
+      "symbol": "SOL",
+      "mint": "So11111111111111111111111111111111111111112"
+    },
+    {
+      "symbol": "USDC",
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    },
+    {
+      "symbol": "cbBTC",
+      "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij"
+    }
+  ],
+  "leg_pools": {
+    "SOL-USDC": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+    "USDC-cbBTC": "7ubS3GccjhQY99AYNKXjNJqnXjaokEdfdV915xnCb96r",
+    "cbBTC-SOL": "HDhWhQCBrSh9xNWmNtsTi86eWj3yCoEiaRodjgNydo1b"
+  },
+  "leg_mints": {
+    "USDC-cbBTC": {
+      "token_x_mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+      "token_y_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    },
+    "cbBTC-SOL": {
+      "token_x_mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+      "token_y_mint": "So11111111111111111111111111111111111111112"
+    }
+  }
+}

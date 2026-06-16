@@ -1,0 +1,32 @@
+{
+  "id": "sol_usdc_weth",
+  "tokens": [
+    {
+      "symbol": "SOL",
+      "mint": "So11111111111111111111111111111111111111112"
+    },
+    {
+      "symbol": "USDC",
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    },
+    {
+      "symbol": "WETH",
+      "mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
+    }
+  ],
+  "fallback_id": "sol_usdc_usdt",
+  "leg_pools": {
+    "SOL-USDC": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+    "WETH-SOL": "3potGhhaNyzvCNq1CGh2wLbZLLMjpdPtG1Hpj8q2DDVR"
+  },
+  "leg_mints": {
+    "SOL-USDC": {
+      "token_x_mint": "So11111111111111111111111111111111111111112",
+      "token_y_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    },
+    "WETH-SOL": {
+      "token_x_mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+      "token_y_mint": "So11111111111111111111111111111111111111112"
+    }
+  }
+}

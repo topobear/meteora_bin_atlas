@@ -118,7 +118,10 @@ def ohlcv_sigma_bins(
 ) -> float:
     """Brownian bin-step volatility implied by pool OHLCV candles."""
     kwargs = {} if processed_dir is None else {"processed_dir": processed_dir}
-    ohlcv, meta = load_pool_ohlcv(pool_address, **kwargs)
+    try:
+        ohlcv, meta = load_pool_ohlcv(pool_address, **kwargs)
+    except FileNotFoundError:
+        return 0.5
     if ohlcv.empty or len(ohlcv) < 2:
         return 0.5
 

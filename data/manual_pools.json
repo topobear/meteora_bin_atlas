@@ -9,6 +9,10 @@
     {
       "pool_address": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq",
       "note": "USDC-USDT; address from @meteora-ag/dlmm SDK README example"
+    },
+    {
+      "pool_address": "3potGhhaNyzvCNq1CGh2wLbZLLMjpdPtG1Hpj8q2DDVR",
+      "note": "SOL-WETH (ETH-SOL); Wormhole WETH on Meteora DLMM"
     }
   ]
 }

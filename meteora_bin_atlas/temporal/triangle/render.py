@@ -1,0 +1,308 @@
+"""Composite triangle MP4 from three leg seismic strips."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageDraw, ImageFont
+
+from meteora_bin_atlas.paths import DATA_PROCESSED, PLOTS_DIR
+from meteora_bin_atlas.temporal.render import resolve_token_labels
+from meteora_bin_atlas.temporal.reserve import build_price_map
+from meteora_bin_atlas.temporal.seismic import (
+    DRIFT_WINDOW_SECONDS,
+    GHOST_HISTORY,
+    GlobalFrame,
+    compute_display_frame,
+    encode_mp4,
+    prepare_snapshot_traces,
+    render_seismic_frame,
+)
+from meteora_bin_atlas.temporal.triangle.resolve import TriangleLeg, TriangleSpec
+
+TRIANGLE_WIDTH = 1800
+TRIANGLE_HEIGHT = 1600
+LEG_STRIP_WIDTH = 900
+LEG_STRIP_HEIGHT = 180
+TRIANGLE_RADIUS = 520
+
+
+@dataclass(frozen=True)
+class LegRenderContext:
+    leg: TriangleLeg
+    traces: list
+    liquidity_scale: float
+    atlas_frame: GlobalFrame
+    token_x: str
+    token_y: str
+    price_for_bin: dict[int, float]
+
+
+def _load_mono_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = (
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    )
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _triangle_vertices(
+    width: int,
+    height: int,
+    radius: float,
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    cx = width / 2
+    cy = height / 2 + radius * 0.08
+    top = (cx, cy - radius)
+    bottom_left = (cx - radius * math.sqrt(3) / 2, cy + radius / 2)
+    bottom_right = (cx + radius * math.sqrt(3) / 2, cy + radius / 2)
+    return top, bottom_left, bottom_right
+
+
+def _vertex_for_symbol(spec: TriangleSpec) -> dict[str, tuple[float, float]]:
+    top, bottom_left, bottom_right = _triangle_vertices(
+        TRIANGLE_WIDTH,
+        TRIANGLE_HEIGHT,
+        TRIANGLE_RADIUS,
+    )
+    symbols = [t.symbol for t in spec.tokens]
+    # Layout: first token top, second bottom-left, third bottom-right.
+    return {
+        symbols[0]: top,
+        symbols[1]: bottom_left,
+        symbols[2]: bottom_right,
+    }
+
+
+def _edge_angle_deg(
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    return math.degrees(math.atan2(end[1] - start[1], end[0] - start[0]))
+
+
+def _prepare_leg_context(
+    leg: TriangleLeg,
+    series_csv: Path,
+    *,
+    processed_dir: Path,
+    zoom_bins: int = 30,
+) -> LegRenderContext:
+    series_df = pd.read_csv(series_csv)
+    if "fetched_at_utc" in series_df.columns:
+        series_df["fetched_at_utc"] = pd.to_datetime(series_df["fetched_at_utc"], utc=True)
+
+    token_x, token_y = resolve_token_labels(leg.pool_address, processed_dir)
+    if leg.flip_display:
+        token_x, token_y = token_y, token_x
+
+    traces, liquidity_scale, atlas_frame = prepare_snapshot_traces(series_df, zoom_bins=zoom_bins)
+    if not traces:
+        raise ValueError(f"No snapshots in {series_csv}")
+
+    return LegRenderContext(
+        leg=leg,
+        traces=traces,
+        liquidity_scale=liquidity_scale,
+        atlas_frame=atlas_frame,
+        token_x=token_x,
+        token_y=token_y,
+        price_for_bin=build_price_map(series_df),
+    )
+
+
+def _render_leg_strip(
+    ctx: LegRenderContext,
+    *,
+    current_index: int,
+    display_frame: GlobalFrame,
+    ghost_indices: list[int],
+    drift_window: int,
+) -> Image.Image:
+    rgb = render_seismic_frame(
+        ctx.traces,
+        frame=display_frame,
+        current_index=current_index,
+        transition_blend=1.0,
+        ghost_indices=ghost_indices,
+        liquidity_scale=ctx.liquidity_scale,
+        drift_window=drift_window,
+        token_x=ctx.token_x,
+        token_y=ctx.token_y,
+        pool_address=ctx.leg.pool_address,
+        price_for_bin=ctx.price_for_bin,
+        width=LEG_STRIP_WIDTH,
+        height=LEG_STRIP_HEIGHT,
+        show_drift_strip=False,
+        compact_hud=True,
+    )
+    return Image.fromarray(rgb)
+
+
+def _paste_strip_on_edge(
+    canvas: Image.Image,
+    strip: Image.Image,
+    *,
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> None:
+    angle = _edge_angle_deg(start, end)
+    rotated = strip.rotate(-angle, resample=Image.Resampling.BICUBIC, expand=True)
+    mid_x = (start[0] + end[0]) / 2
+    mid_y = (start[1] + end[1]) / 2
+    paste_x = int(mid_x - rotated.width / 2)
+    paste_y = int(mid_y - rotated.height / 2)
+    canvas.paste(rotated, (paste_x, paste_y), rotated if rotated.mode == "RGBA" else None)
+
+
+def _draw_triangle_frame(
+    spec: TriangleSpec,
+    leg_contexts: list[LegRenderContext],
+    *,
+    frame_index: int,
+    display_frames: list[GlobalFrame | None],
+    prior_indices: list[list[int]],
+    drift_window: int,
+) -> np.ndarray:
+    canvas = Image.new("RGBA", (TRIANGLE_WIDTH, TRIANGLE_HEIGHT), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    vertices = _vertex_for_symbol(spec)
+    vertex_points = [vertices[t.symbol] for t in spec.tokens]
+    draw.polygon(vertex_points, outline=(80, 100, 120, 220), fill=(8, 12, 18, 255))
+
+    title_font = _load_mono_font(28)
+    label_font = _load_mono_font(22)
+    hud_font = _load_mono_font(18)
+
+    for symbol, point in vertices.items():
+        draw.ellipse(
+            [point[0] - 10, point[1] - 10, point[0] + 10, point[1] + 10],
+            fill=(255, 138, 0, 255),
+            outline=(255, 255, 255, 200),
+        )
+        bbox = draw.textbbox((0, 0), symbol, font=label_font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        draw.text(
+            (point[0] - tw / 2, point[1] - th - 16),
+            symbol,
+            fill=(232, 244, 255, 255),
+            font=label_font,
+        )
+
+    n_frames = min(len(ctx.traces) for ctx in leg_contexts)
+    current_index = min(frame_index, n_frames - 1)
+
+    for leg_idx, ctx in enumerate(leg_contexts):
+        display_frames[leg_idx] = compute_display_frame(
+            ctx.traces,
+            current_index,
+            display_frames[leg_idx],
+            atlas=ctx.atlas_frame,
+        )
+        ghost_indices = prior_indices[leg_idx][-GHOST_HISTORY:]
+        strip = _render_leg_strip(
+            ctx,
+            current_index=current_index,
+            display_frame=display_frames[leg_idx],  # type: ignore[arg-type]
+            ghost_indices=ghost_indices,
+            drift_window=drift_window,
+        )
+
+        start = vertices[ctx.leg.token_a]
+        end = vertices[ctx.leg.token_b]
+        _paste_strip_on_edge(canvas, strip, start=start, end=end)
+        prior_indices[leg_idx].append(current_index)
+
+        mid_x = (start[0] + end[0]) / 2
+        mid_y = (start[1] + end[1]) / 2
+        leg_label = f"{ctx.leg.token_a}/{ctx.leg.token_b}"
+        lb = draw.textbbox((0, 0), leg_label, font=hud_font)
+        lw = lb[2] - lb[0]
+        draw.text(
+            (mid_x - lw / 2, mid_y - 8),
+            leg_label,
+            fill=(190, 210, 230, 200),
+            font=hud_font,
+        )
+
+    title = f"CURRENCY TRIANGLE · {spec.triangle_id.upper().replace('_', '/')}"
+    if spec.used_fallback and spec.fallback_from:
+        title += f" (fallback from {spec.fallback_from})"
+    draw.text((36, 24), title, fill=(190, 210, 230, 255), font=title_font)
+    draw.text(
+        (36, 58),
+        f"FRAME {current_index + 1}/{n_frames}",
+        fill=(175, 195, 215, 230),
+        font=hud_font,
+    )
+
+    return np.asarray(canvas.convert("RGB"))
+
+
+def build_triangle_temporal_mp4(
+    spec: TriangleSpec,
+    leg_csv_paths: tuple[Path, Path, Path],
+    *,
+    output_path: Path | None = None,
+    fps: int = 24,
+    processed_dir: Path = DATA_PROCESSED,
+    zoom_bins: int = 30,
+    dpi: int = 150,
+) -> Path:
+    """Build a triangle composite MP4 from three leg series CSVs."""
+    _ = dpi
+    if len(spec.legs) != 3 or len(leg_csv_paths) != 3:
+        raise ValueError("Triangle render requires exactly three legs and three CSV paths")
+
+    leg_contexts = [
+        _prepare_leg_context(leg, csv_path, processed_dir=processed_dir, zoom_bins=zoom_bins)
+        for leg, csv_path in zip(spec.legs, leg_csv_paths, strict=True)
+    ]
+
+    n_frames = min(len(ctx.traces) for ctx in leg_contexts)
+    if n_frames <= 0:
+        raise ValueError("No snapshots available across triangle legs")
+
+    video_duration_sec = max(1e-6, n_frames / fps)
+    index_span = max(1, n_frames - 1)
+    snapshots_per_video_sec = index_span / video_duration_sec
+    drift_window = max(2, int(round(DRIFT_WINDOW_SECONDS * snapshots_per_video_sec)))
+
+    display_frames: list[GlobalFrame | None] = [None, None, None]
+    prior_indices: list[list[int]] = [[], [], []]
+    frame_arrays: list[np.ndarray] = []
+
+    for frame_index in range(n_frames):
+        frame_arrays.append(
+            _draw_triangle_frame(
+                spec,
+                leg_contexts,
+                frame_index=frame_index,
+                display_frames=display_frames,
+                prior_indices=prior_indices,
+                drift_window=drift_window,
+            )
+        )
+
+    if output_path is None:
+        PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+        from datetime import UTC, datetime
+
+        ts = datetime.now(UTC).isoformat().replace(":", "-").replace(".", "-")
+        output_path = PLOTS_DIR / f"triangle_temporal_{spec.triangle_id}_{ts}.mp4"
+
+    output_path = output_path.resolve()
+    encode_mp4(frame_arrays, output_path, fps=fps)
+    print(f"Triangle MP4: {output_path}")
+    return output_path
