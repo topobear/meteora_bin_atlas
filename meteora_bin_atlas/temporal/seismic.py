@@ -392,21 +392,30 @@ def _layer_rgb(hex_color: str, *, layer_age: int) -> tuple[int, int, int]:
     return _dim_rgb(_hex_to_rgb(hex_color), layer_age=layer_age)
 
 
-def _composition_rgb(x_amount: float, y_amount: float) -> tuple[int, int, int]:
-    """Colour a bin by its actual token mix: cyan (Y) → purple → magenta (X).
+def _composition_rgb(
+    x_amount: float,
+    y_amount: float,
+    *,
+    token_colors: dict[str, str] | None = None,
+    token_color_mode: str = "blend",
+) -> tuple[int, int, int]:
+    """Colour a bin by its actual token mix: Y hue → blend → X hue.
 
     The blend fraction is the bin's share of token X, so a bin holding only Y
-    (USDC) is cyan, only X (SOL) is magenta, and a balanced bin sits at the
-    purple midpoint — a continuous read of inventory composition.
+    is the Y colour, only X is the X colour, and a balanced bin sits at the
+    midpoint — a continuous read of inventory composition.
     """
+    palette = token_colors or SEISMIC_TOKEN_COLORS
     x = max(0.0, x_amount)
     y = max(0.0, y_amount)
     total = x + y
     if total <= 0:
-        return _hex_to_rgb(SEISMIC_TOKEN_COLORS["empty"])
+        return _hex_to_rgb(palette["empty"])
     share_x = x / total
-    y_rgb = _hex_to_rgb(SEISMIC_TOKEN_COLORS["Y"])
-    x_rgb = _hex_to_rgb(SEISMIC_TOKEN_COLORS["X"])
+    y_rgb = _hex_to_rgb(palette["Y"])
+    x_rgb = _hex_to_rgb(palette["X"])
+    if token_color_mode == "dominant":
+        return x_rgb if share_x >= 0.5 else y_rgb
     return tuple(int(round(y_rgb[i] + (x_rgb[i] - y_rgb[i]) * share_x)) for i in range(3))
 
 
@@ -554,13 +563,20 @@ def _draw_horizontal_wiggle_trace(
     plot_right: int,
     layer: LayerStyle,
     layer_age: int,
+    token_colors: dict[str, str] | None = None,
+    token_color_mode: str = "blend",
+    highlight_active_bin: bool = True,
+    active_bin_deflection_scale: float = 1.0,
+    active_bin_neighbor_cap: float | None = None,
+    active_bin_neighbor_radius: int = 4,
 ) -> None:
     if layer.fill_alpha <= 0 and layer.outline_alpha <= 0:
         return
 
     cell_w = _bin_cell_width(frame=frame, plot_left=plot_left, plot_right=plot_right)
     x_drift = layer_age * GHOST_TRACE_X_DRIFT
-    wiggle_points: list[tuple[float, float]] = []
+    active_id = int(trace.active_bin_id)
+    bars: list[tuple[int, float, float, float, float, int]] = []
 
     for bin_id, liquidity, x_amount, y_amount in zip(
         trace.bin_ids,
@@ -578,19 +594,45 @@ def _draw_horizontal_wiggle_trace(
         x_center = _x_center_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w)
         x_center += x_drift
         offset = (float(liquidity) / liquidity_scale) * max_deflection
+        distance = bin_id - active_id
+        if distance == 0 and active_bin_deflection_scale != 1.0:
+            offset *= active_bin_deflection_scale
+        bars.append((bin_id, x_center, offset, float(x_amount), float(y_amount), distance))
+
+    if active_bin_neighbor_cap is not None:
+        neighbor_offsets = [offset for _bid, _x, offset, _xa, _ya, dist in bars if dist != 0]
+        if neighbor_offsets:
+            cap = max(neighbor_offsets) * active_bin_neighbor_cap
+            bars = [
+                (bin_id, x_center, min(offset, cap) if bin_id == active_id else offset, xa, ya, dist)
+                for bin_id, x_center, offset, xa, ya, dist in bars
+            ]
+
+    wiggle_points: list[tuple[float, float]] = []
+    for bin_id, x_center, offset, x_amount, y_amount, distance in bars:
         peak_y = trace_y - offset
         wiggle_points.append((x_center, peak_y))
 
         if layer.fill_alpha <= 0:
             continue
 
-        distance = bin_id - trace.active_bin_id
-        if distance == 0:
-            # The active (price/handoff) bin is always orange so it stays the
-            # unambiguous marker every frame, whatever its token mix.
+        if distance == 0 and highlight_active_bin:
+            # Default temporal look: orange active bar stands out from composition blend.
             base_rgb = _hex_to_rgb(SEISMIC_ACTIVE_COLOR)
+        elif token_color_mode == "active_sides":
+            if distance < 0:
+                base_rgb = _hex_to_rgb((token_colors or SEISMIC_TOKEN_COLORS)["Y"])
+            elif distance > 0:
+                base_rgb = _hex_to_rgb((token_colors or SEISMIC_TOKEN_COLORS)["X"])
+            else:
+                base_rgb = _hex_to_rgb((token_colors or SEISMIC_TOKEN_COLORS).get("mix", "E8F4FF"))
         else:
-            base_rgb = _composition_rgb(float(x_amount), float(y_amount))
+            base_rgb = _composition_rgb(
+                x_amount,
+                y_amount,
+                token_colors=token_colors,
+                token_color_mode=token_color_mode,
+            )
         rgb = _dim_rgb(base_rgb, layer_age=layer_age)
 
         x_left = _x_edge_for_bin_id(bin_id, frame=frame, plot_left=plot_left, cell_w=cell_w) + x_drift
@@ -827,15 +869,24 @@ def render_seismic_frame(
     edge_strip: bool = False,
     deflection_ratio: float | None = None,
     drift_headroom: float | None = None,
+    token_colors: dict[str, str] | None = None,
+    token_color_mode: str = "blend",
+    highlight_active_bin: bool = True,
+    active_bin_deflection_scale: float = 1.0,
+    active_bin_neighbor_cap: float | None = None,
+    active_bin_neighbor_radius: int = 4,
+    left_drift_color: tuple[int, int, int] | None = None,
+    right_drift_color: tuple[int, int, int] | None = None,
 ) -> np.ndarray:
     """Render the blackboard with a viewport recentered on the active bin marker."""
     _ = zoom_bins
     current_index = max(0, min(current_index, len(traces) - 1))
     total_traces = len(traces)
+    palette = token_colors or SEISMIC_TOKEN_COLORS
 
     if edge_strip:
-        show_drift_strip = True
-        compact_hud = False
+        show_drift_strip = False
+        compact_hud = True
 
     canvas_bg = (0, 0, 0, 0) if edge_strip else style.background + (255,)
     img = Image.new("RGBA", (width, height), canvas_bg)
@@ -880,6 +931,12 @@ def render_seismic_frame(
             plot_right=right,
             layer=layer,
             layer_age=layer_age,
+            token_colors=token_colors,
+            token_color_mode=token_color_mode,
+            highlight_active_bin=highlight_active_bin,
+            active_bin_deflection_scale=active_bin_deflection_scale,
+            active_bin_neighbor_cap=active_bin_neighbor_cap,
+            active_bin_neighbor_radius=active_bin_neighbor_radius,
         )
 
     if show_drift_strip:
@@ -891,6 +948,8 @@ def render_seismic_frame(
             style=style,
             window=drift_window,
             drift_headroom=drift_headroom,
+            left_drift_color=left_drift_color,
+            right_drift_color=right_drift_color,
         )
 
     channel_x = (DRIFT_STRIP_RIGHT + 8) if show_drift_strip else (left + 4)
@@ -970,25 +1029,31 @@ def render_seismic_frame(
         draw.text(
             (legend_x, legend_y),
             f"| {token_y} (Y)",
-            fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["Y"], layer_age=0), 240),
+            fill=(*_layer_rgb(palette["Y"], layer_age=0), 240),
             font=legend_font,
         )
         draw.text(
             (legend_x, legend_y + legend_line),
             f"| {token_x} (X)",
-            fill=(*_layer_rgb(SEISMIC_TOKEN_COLORS["X"], layer_age=0), 240),
+            fill=(*_layer_rgb(palette["X"], layer_age=0), 240),
             font=legend_font,
         )
+        mix_rgb = _hex_to_rgb(palette.get("mix", palette["Y"]))
         draw.text(
             (legend_x, legend_y + 2 * legend_line),
             f"| {token_x}+{token_y} (mix)",
-            fill=(*_composition_rgb(1.0, 1.0), 240),
+            fill=(*mix_rgb, 240),
             font=legend_font,
+        )
+        active_legend_rgb = (
+            _hex_to_rgb(SEISMIC_ACTIVE_COLOR)
+            if highlight_active_bin
+            else mix_rgb
         )
         draw.text(
             (legend_x, legend_y + 3 * legend_line),
             "| ACTIVE",
-            fill=(*_hex_to_rgb(SEISMIC_ACTIVE_COLOR), 255),
+            fill=(*active_legend_rgb, 255),
             font=legend_font,
         )
 

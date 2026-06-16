@@ -24,27 +24,40 @@ from meteora_bin_atlas.temporal.seismic import (
 )
 from meteora_bin_atlas.temporal.triangle.resolve import TriangleLeg, TriangleSpec
 
-# Leg strips render at the same pixel density as make temporal, then scale to each edge.
+# Leg strips reuse the temporal seismic renderer, but as compact edge-facing plots.
 DEFAULT_LEG_DPI = 150
-TRIANGLE_WIDTH = 2600
-TRIANGLE_HEIGHT = 2400
-TRIANGLE_RADIUS = 580
-LEG_LABEL_OFFSET = 32
+TRIANGLE_WIDTH = 3600
+TRIANGLE_HEIGHT = 3400
+TRIANGLE_RADIUS = 860
+TRIANGLE_EDGE_COVERAGE = 0.86
+TRIANGLE_STRIP_WIDTH = 1800
+TRIANGLE_STRIP_HEIGHT = 360
+TRIANGLE_STRIP_EDGE_GAP = 8
+LEG_LABEL_OFFSET = 26
 
-# Tighter than single-pool temporal: shorter liquidity pyramids, narrower bin viewport.
-TRIANGLE_DEFLECTION_RATIO = 0.48
-TRIANGLE_LIQUIDITY_SCALE_HEADROOM = 1.4
-TRIANGLE_DRIFT_HEADROOM = 1.55
+TRIANGLE_TOKEN_COLORS = {
+    "X": "#FF335C",
+    "Y": "#3BA7FF",
+    "mix": "#E8F4FF",
+    "empty": "#000000",
+}
+
+# Shorter skyline bars; active bin capped to neighbor heights.
+TRIANGLE_DEFLECTION_RATIO = 0.28
+TRIANGLE_LIQUIDITY_SCALE_HEADROOM = 2.85
+TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP = 1.0
+TRIANGLE_DRIFT_HEADROOM = 2.15
 TRIANGLE_DISPLAY_PAD_BINS = 2
-TRIANGLE_MIN_DISPLAY_BINS = 14
-TRIANGLE_VIEWPORT_EDGE_BAND = 6
-TRIANGLE_ZOOM_IN_RATIO = 0.52
+TRIANGLE_MIN_DISPLAY_BINS = 12
+TRIANGLE_VIEWPORT_EDGE_BAND = 4
+TRIANGLE_ZOOM_IN_RATIO = 0.44
 TRIANGLE_ROLLING_SNAPSHOTS = 3
 
 
 def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
-    """Match make temporal: 14×8 inches at the given DPI."""
-    return int(14 * dpi), int(8 * dpi)
+    """Return a compact source strip; ``dpi`` is retained for CLI compatibility."""
+    _ = dpi
+    return TRIANGLE_STRIP_WIDTH, TRIANGLE_STRIP_HEIGHT
 
 
 @dataclass(frozen=True)
@@ -111,6 +124,23 @@ def _triangle_centroid(points: list[tuple[float, float]]) -> tuple[float, float]
         sum(p[0] for p in points) / len(points),
         sum(p[1] for p in points) / len(points),
     )
+
+
+def _inward_edge_normal(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    *,
+    centroid: tuple[float, float],
+) -> tuple[float, float]:
+    mid_x = (start[0] + end[0]) / 2
+    mid_y = (start[1] + end[1]) / 2
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy / length, dx / length
+    if (centroid[0] - mid_x) * nx + (centroid[1] - mid_y) * ny > 0:
+        nx, ny = -nx, -ny
+    return nx, ny
 
 
 def _outward_label_point(
@@ -188,19 +218,28 @@ def _render_leg_strip(
         edge_strip=True,
         deflection_ratio=TRIANGLE_DEFLECTION_RATIO,
         drift_headroom=TRIANGLE_DRIFT_HEADROOM,
+        token_colors=TRIANGLE_TOKEN_COLORS,
+        token_color_mode="active_sides",
+        highlight_active_bin=False,
+        active_bin_neighbor_cap=TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP,
     )
-    return Image.fromarray(rgba, mode="RGBA")
+    image = Image.fromarray(rgba, mode="RGBA")
+    return image.crop(_plot_crop_box(width, height))
 
 
 def _scale_strip_to_edge(strip: Image.Image, edge_length: float) -> Image.Image:
-    """Down/up-scale the native temporal-resolution strip to fit the triangle edge."""
+    """Down/up-scale the compact strip to sit on the triangle edge."""
     if strip.width <= 0:
         return strip
-    scale = edge_length / strip.width
+    scale = (edge_length * TRIANGLE_EDGE_COVERAGE) / strip.width
     if abs(scale - 1.0) < 1e-3:
         return strip
     new_size = (max(1, int(round(strip.width * scale))), max(1, int(round(strip.height * scale))))
     return strip.resize(new_size, Image.Resampling.LANCZOS)
+
+
+def _plot_crop_box(width: int, height: int) -> tuple[int, int, int, int]:
+    return (20, 48, width - 12, height - 36)
 
 
 def _paste_strip_on_edge(
@@ -209,9 +248,14 @@ def _paste_strip_on_edge(
     *,
     start: tuple[float, float],
     end: tuple[float, float],
+    centroid: tuple[float, float],
+    edge_gap: float = TRIANGLE_STRIP_EDGE_GAP,
 ) -> None:
     edge_length = math.hypot(end[0] - start[0], end[1] - start[1])
     strip_rgba = _scale_strip_to_edge(strip.convert("RGBA"), edge_length)
+    # Local +Y is outward after the vertical flip, so the plot baseline hugs the
+    # triangle side and the liquidity skyline grows away from the triangle.
+    strip_rgba = strip_rgba.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     angle = _edge_angle_deg(start, end)
     rotated = strip_rgba.rotate(
         -angle,
@@ -221,8 +265,10 @@ def _paste_strip_on_edge(
     )
     mid_x = (start[0] + end[0]) / 2
     mid_y = (start[1] + end[1]) / 2
-    paste_x = int(mid_x - rotated.width / 2)
-    paste_y = int(mid_y - rotated.height / 2)
+    outward_x, outward_y = _inward_edge_normal(start, end, centroid=centroid)
+    shift = (strip_rgba.height / 2) + edge_gap
+    paste_x = int(mid_x - rotated.width / 2 + outward_x * shift)
+    paste_y = int(mid_y - rotated.height / 2 + outward_y * shift)
     canvas.paste(rotated, (paste_x, paste_y), rotated)
 
 
@@ -272,7 +318,13 @@ def _draw_triangle_frame(
         prior_indices[leg_idx].append(current_index)
 
     for _ctx, strip, start, end in leg_strips:
-        _paste_strip_on_edge(canvas, strip, start=start, end=end)
+        _paste_strip_on_edge(
+            canvas,
+            strip,
+            start=start,
+            end=end,
+            centroid=centroid,
+        )
 
     draw = ImageDraw.Draw(canvas, "RGBA")
     draw.polygon(vertex_points, outline=(100, 130, 160, 240), fill=None)
