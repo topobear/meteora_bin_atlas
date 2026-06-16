@@ -465,6 +465,12 @@ Choose one:
 
 If restored, keep it read-only and separate from `public-drop` v1. The triangle can become a later artifact family, but it should not block the Meteora DLMM visual drop pipeline.
 
+### Visual direction
+
+Evolve the currency triangle composite (`triangle_temporal_*.mp4` — three leg seismic strips on a SOL/USDC/USDT lattice) into a **miniature scientific instrument** readout: a compact, self-contained viz that reads like a dedicated three-asset geometry probe, not three pool views stitched together. Same cyber-scientific fieldwork language as the main drops — instrument casing, calibrated scales, leg labels as probe channels, the triangle as the coordinate frame for cross-rate geometry.
+
+The payoff is **repeatable visual measurement**: fixed scales, consistent framing, and leg geometry that stay stable across runs so you can read the same instrument before, during, and after market events (depegs, volatility spikes, routing stress) and compare frames like instrument traces rather than re-interpreting a new chart each time.
+
 ### Review checklist
 
 Step 11 is complete when:

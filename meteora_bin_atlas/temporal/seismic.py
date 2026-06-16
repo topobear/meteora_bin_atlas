@@ -689,6 +689,9 @@ def _draw_drift_seismograph(
     right_drift_color: tuple[int, int, int] | None = None,
     trace_color: tuple[int, int, int] | None = None,
     centre_line_color: tuple[int, int, int] | None = None,
+    trace_width: int = 2,
+    fill_alpha: int = 70,
+    panel_alpha: int = 130,
 ) -> None:
     """Vertical sparkline of active-bin drift (left/right) from the series centre.
 
@@ -739,7 +742,7 @@ def _draw_drift_seismograph(
     # Panel + centre baseline (drift = 0).
     draw.rectangle(
         [strip_left - 3, top, strip_right + 3, bottom],
-        fill=(6, 10, 14, 130),
+        fill=(6, 10, 14, panel_alpha),
         outline=(*style.hud[:3], 45),
     )
     centre_rgb = centre_line_color or style.baseline[:3]
@@ -759,18 +762,19 @@ def _draw_drift_seismograph(
         col = left_color if side < 0 else right_color
         draw.polygon(
             [(strip_cx, y0), (x0, y0), (x1, y1), (strip_cx, y1)],
-            fill=(*col, 70),
+            fill=(*col, fill_alpha),
         )
 
     # Bright trace line over the fill.
     points = [(x_for(i), y_for(i)) for i in range(first, n + 1)]
     if len(points) >= 2:
-        draw.line(points, fill=(*trace_rgb, 225), width=2, joint="curve")
+        draw.line(points, fill=(*trace_rgb, 235), width=trace_width, joint="curve")
 
     # NOW marker pinned at the bottom: gridline + dot at the latest sample.
     nx, ny = x_for(n), y_for(n)
     draw.line([(strip_left, ny), (strip_right, ny)], fill=(255, 255, 255, 70), width=1)
-    draw.ellipse([nx - 4, ny - 4, nx + 4, ny + 4], fill=(255, 255, 255, 255))
+    dot_r = max(4, trace_width + 2)
+    draw.ellipse([nx - dot_r, ny - dot_r, nx + dot_r, ny + dot_r], fill=(255, 255, 255, 255))
 
     # Bold all-caps DRIFT header (double-struck for weight); the spot headline
     # ticker sits just above it.
@@ -877,6 +881,9 @@ def render_seismic_frame(
     active_bin_neighbor_radius: int = 4,
     left_drift_color: tuple[int, int, int] | None = None,
     right_drift_color: tuple[int, int, int] | None = None,
+    drift_trace_width: int = 2,
+    drift_fill_alpha: int = 70,
+    drift_panel_alpha: int = 130,
 ) -> np.ndarray:
     """Render the blackboard with a viewport recentered on the active bin marker."""
     _ = zoom_bins
@@ -951,6 +958,9 @@ def render_seismic_frame(
             drift_headroom=drift_headroom,
             left_drift_color=left_drift_color,
             right_drift_color=right_drift_color,
+            trace_width=drift_trace_width,
+            fill_alpha=drift_fill_alpha,
+            panel_alpha=drift_panel_alpha,
         )
 
     channel_x = (DRIFT_STRIP_RIGHT + 8) if show_drift_strip else (left + 4)

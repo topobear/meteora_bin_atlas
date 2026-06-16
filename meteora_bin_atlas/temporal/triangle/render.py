@@ -15,7 +15,6 @@ from meteora_bin_atlas.temporal.render import resolve_token_labels
 from meteora_bin_atlas.temporal.reserve import build_price_map
 from meteora_bin_atlas.temporal.seismic import (
     DRIFT_WINDOW_SECONDS,
-    GHOST_HISTORY,
     GlobalFrame,
     compute_display_frame,
     encode_mp4,
@@ -28,12 +27,12 @@ from meteora_bin_atlas.temporal.triangle.resolve import TriangleLeg, TriangleSpe
 DEFAULT_LEG_DPI = 150
 TRIANGLE_WIDTH = 3600
 TRIANGLE_HEIGHT = 3400
-TRIANGLE_RADIUS = 860
-TRIANGLE_EDGE_COVERAGE = 0.86
+TRIANGLE_RADIUS = 1040
+TRIANGLE_EDGE_COVERAGE = 0.92
 TRIANGLE_STRIP_WIDTH = 1800
-TRIANGLE_STRIP_HEIGHT = 420
+TRIANGLE_STRIP_HEIGHT = 1200
 TRIANGLE_STRIP_EDGE_GAP = 8
-LEG_LABEL_OFFSET = 98
+LEG_LABEL_OFFSET = 132
 
 TRIANGLE_TOKEN_COLORS = {
     "X": "#FF9A24",
@@ -53,9 +52,10 @@ TRIANGLE_MIN_DISPLAY_BINS = 12
 TRIANGLE_VIEWPORT_EDGE_BAND = 4
 TRIANGLE_ZOOM_IN_RATIO = 0.44
 TRIANGLE_ROLLING_SNAPSHOTS = 3
+TRIANGLE_HISTORY = 36
 TRIANGLE_LANDSCAPE_STEP = 30
-TRIANGLE_LANDSCAPE_ALPHA = 78
-TRIANGLE_LANDSCAPE_RIDGE_ALPHA = 150
+TRIANGLE_LANDSCAPE_ALPHA = 90
+TRIANGLE_LANDSCAPE_RIDGE_ALPHA = 170
 
 
 def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
@@ -228,6 +228,9 @@ def _render_leg_strip(
         active_bin_neighbor_cap=TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP,
         left_drift_color=(59, 167, 255),
         right_drift_color=(255, 154, 36),
+        drift_trace_width=5,
+        drift_fill_alpha=112,
+        drift_panel_alpha=170,
     )
     image = Image.fromarray(rgba, mode="RGBA")
     strip = image.crop(_plot_crop_box(width, height))
@@ -238,7 +241,71 @@ def _render_leg_strip(
         display_frame=display_frame,
         ghost_indices=ghost_indices,
     )
+    _draw_edge_price_ticker(strip, ctx=ctx, current_index=current_index)
     return strip
+
+
+def _format_edge_price(price: float) -> str:
+    if price >= 1_000:
+        return f"{price:,.0f}"
+    if price >= 10:
+        return f"{price:,.2f}"
+    if price >= 1:
+        return f"{price:,.3f}"
+    return f"{price:.4g}"
+
+
+def _draw_edge_price_ticker(
+    strip: Image.Image,
+    *,
+    ctx: LegRenderContext,
+    current_index: int,
+) -> None:
+    if not ctx.price_for_bin:
+        return
+    current = ctx.traces[current_index]
+    spot_price = ctx.price_for_bin.get(int(current.active_bin_id))
+    if spot_price is None or spot_price <= 0:
+        return
+
+    prev_active = (
+        int(ctx.traces[current_index - 1].active_bin_id)
+        if current_index > 0
+        else int(current.active_bin_id)
+    )
+    delta = int(current.active_bin_id) - prev_active
+    if delta < 0:
+        accent = (59, 167, 255)
+    elif delta > 0:
+        accent = (255, 154, 36)
+    else:
+        accent = (180, 196, 214)
+
+    overlay = Image.new("RGBA", strip.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay, "RGBA")
+    label_font = _load_mono_font(16)
+    price_font = _load_mono_font(34)
+
+    panel = [122, 18, 366, 100]
+    draw.rectangle(panel, fill=(4, 7, 12, 220), outline=(*accent, 205), width=2)
+    center_x = (panel[0] + panel[2]) / 2
+    draw.text(
+        (center_x, panel[1] + 11),
+        f"{ctx.token_y}/{ctx.token_x}",
+        fill=(175, 195, 215, 245),
+        font=label_font,
+        anchor="ma",
+    )
+    draw.text(
+        (center_x, panel[1] + 36),
+        _format_edge_price(float(spot_price)),
+        fill=(*accent, 255),
+        font=price_font,
+        anchor="ma",
+    )
+    # The whole strip is flipped before being pasted outward. Pre-flip the text
+    # overlay so the final edge-local ticker stays readable.
+    strip.alpha_composite(overlay.transpose(Image.Transpose.FLIP_TOP_BOTTOM))
 
 
 def _strip_bin_geometry(strip: Image.Image, frame: GlobalFrame) -> tuple[float, float, float]:
@@ -264,13 +331,13 @@ def _trace_landscape_segments(
     slot: int,
     frame: GlobalFrame,
     strip: Image.Image,
-) -> list[tuple[float, float, float, float, tuple[int, int, int]]]:
+) -> list[tuple[float, float, float, float, tuple[int, int, int], bool]]:
     trace = ctx.traces[trace_index]
     plot_left, _plot_right, cell_w = _strip_bin_geometry(strip, frame)
     base_y = strip.height - 4 - slot * TRIANGLE_LANDSCAPE_STEP
     max_deflection = strip.height * TRIANGLE_DEFLECTION_RATIO
     liquidity_scale = ctx.liquidity_scale * TRIANGLE_LIQUIDITY_SCALE_HEADROOM
-    segments: list[tuple[float, float, float, float, tuple[int, int, int]]] = []
+    segments: list[tuple[float, float, float, float, tuple[int, int, int], bool]] = []
 
     for bin_id, liquidity in zip(trace.bin_ids, trace.liquidity, strict=True):
         bin_id = int(bin_id)
@@ -281,8 +348,9 @@ def _trace_landscape_segments(
         x_left = plot_left + (bin_id - frame.bin_id_min) * cell_w
         x_right = x_left + cell_w
         peak_y = base_y - (float(liquidity) / liquidity_scale) * max_deflection
+        active = bin_id == int(trace.active_bin_id)
         color = _strip_bin_color(bin_id, int(trace.active_bin_id))
-        segments.append((x_left, x_right, base_y, peak_y, color))
+        segments.append((x_left, x_right, base_y, peak_y, color, active))
     return segments
 
 
@@ -294,13 +362,13 @@ def _draw_edge_landscape_trail(
     display_frame: GlobalFrame,
     ghost_indices: list[int],
 ) -> None:
-    history = [idx for idx in ghost_indices[-GHOST_HISTORY:] if idx < current_index]
+    history = [idx for idx in ghost_indices[-TRIANGLE_HISTORY:] if idx < current_index]
     if not history:
         return
 
     draw = ImageDraw.Draw(strip, "RGBA")
     plot_left, plot_right, _cell_w = _strip_bin_geometry(strip, display_frame)
-    rows: list[tuple[int, int, list[tuple[float, float, float, float, tuple[int, int, int]]]]] = []
+    rows: list[tuple[int, int, list[tuple[float, float, float, float, tuple[int, int, int], bool]]]] = []
     ordered = list(reversed(history))
     for slot, trace_index in enumerate(ordered, start=1):
         segments = _trace_landscape_segments(
@@ -315,21 +383,28 @@ def _draw_edge_landscape_trail(
 
     for slot, _trace_index, segments in reversed(rows):
         lane_y = strip.height - 4 - slot * TRIANGLE_LANDSCAPE_STEP
-        lane_alpha = max(16, int(56 * (0.88 ** slot)))
+        lane_alpha = max(28, int(70 * (0.985 ** slot)))
         draw.line(
             [(plot_left, lane_y), (plot_right, lane_y)],
             fill=(150, 170, 195, lane_alpha),
             width=1,
         )
 
-        fill_alpha = max(18, int(TRIANGLE_LANDSCAPE_ALPHA * (0.88 ** slot)))
-        ridge_alpha = max(34, int(TRIANGLE_LANDSCAPE_RIDGE_ALPHA * (0.90 ** slot)))
+        fill_alpha = max(36, int(TRIANGLE_LANDSCAPE_ALPHA * (0.98 ** slot)))
+        ridge_alpha = max(62, int(TRIANGLE_LANDSCAPE_RIDGE_ALPHA * (0.985 ** slot)))
         ridge_points: list[tuple[float, float]] = []
-        for x_left, x_right, base_y, peak_y, color in segments:
+        for x_left, x_right, base_y, peak_y, color, active in segments:
+            segment_alpha = 210 if active else fill_alpha
             draw.rectangle(
                 [x_left, peak_y, x_right, base_y],
-                fill=(*color, fill_alpha),
+                fill=(*color, segment_alpha),
             )
+            if active:
+                draw.line(
+                    [(x_left, peak_y), (x_right, peak_y)],
+                    fill=(255, 255, 255, 230),
+                    width=2,
+                )
             ridge_points.append(((x_left + x_right) / 2, peak_y))
         if len(ridge_points) >= 2:
             draw.line(
@@ -342,17 +417,17 @@ def _draw_edge_landscape_trail(
     # Stitch adjacent history slices so the eye reads a surface, not isolated bars.
     for (slot_a, _idx_a, segs_a), (slot_b, _idx_b, segs_b) in zip(rows, rows[1:], strict=False):
         _ = slot_a, slot_b
-        by_bin_b = {round((x_left + x_right) / 2, 2): (x_left, x_right, base_y, peak_y, color)
-                    for x_left, x_right, base_y, peak_y, color in segs_b}
-        for x_left, x_right, _base_y, peak_y, color in segs_a:
+        by_bin_b = {round((x_left + x_right) / 2, 2): (x_left, x_right, base_y, peak_y, color, active)
+                    for x_left, x_right, base_y, peak_y, color, active in segs_b}
+        for x_left, x_right, _base_y, peak_y, color, active in segs_a:
             key = round((x_left + x_right) / 2, 2)
             other = by_bin_b.get(key)
             if other is None:
                 continue
-            ox_left, ox_right, _obase_y, opeak_y, _ocolor = other
+            ox_left, ox_right, _obase_y, opeak_y, _ocolor, _oactive = other
             draw.polygon(
                 [(x_left, peak_y), (x_right, peak_y), (ox_right, opeak_y), (ox_left, opeak_y)],
-                fill=(*color, 24),
+                fill=(*color, 62 if active else 46),
             )
 
 
@@ -432,7 +507,7 @@ def _draw_triangle_frame(
             rolling_snapshots=TRIANGLE_ROLLING_SNAPSHOTS,
             zoom_in_ratio=TRIANGLE_ZOOM_IN_RATIO,
         )
-        ghost_indices = prior_indices[leg_idx][-GHOST_HISTORY:]
+        ghost_indices = prior_indices[leg_idx][-TRIANGLE_HISTORY:]
         strip = _render_leg_strip(
             ctx,
             current_index=current_index,
@@ -464,10 +539,10 @@ def _draw_triangle_frame(
             width=2,
         )
 
-    label_font = _load_mono_font(20)
+    label_font = _load_mono_font(24)
     title_font = _load_mono_font(28)
     hud_font = _load_mono_font(18)
-    edge_label_font = _load_mono_font(26)
+    edge_label_font = _load_mono_font(36)
 
     for symbol, point in vertices.items():
         draw.ellipse(
