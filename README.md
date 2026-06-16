@@ -108,8 +108,9 @@ The notebook runs the TypeScript pipeline via shell commands, loads the bin atla
 src/           TypeScript pipeline (config, Solana connection, scripts)
 notebooks/     Jupyter research notebooks
 data/raw/      Raw fetched snapshots
-data/processed/ Normalized tables
-plots/         Saved figures
+data/processed/ Normalized tables (real RPC data)
+data/simulated/ Synthetic snapshot series (no RPC)
+plots/         Saved figures and MP4s
 notes/         Domain notes and research log
 ```
 
@@ -197,6 +198,53 @@ make render-mp4
 ```
 
 Outputs: `data/processed/pool_ohlcv_<pool>_<tf>_*.json` and `data/processed/bin_atlas_series_<pool>_*.csv`.
+
+### Render animation (real vs simulated)
+
+Real RPC data lives in `data/processed/`; simulated series are written to `data/simulated/` (seeded from a real snapshot, no RPC). MP4s land in `plots/` (e.g. `plots/temporal_<pool>_<timestamp>.mp4`). There is no side-by-side MP4 target — render two separate videos.
+
+**Real (non-simulated)** — from the latest series CSV in `data/processed/`:
+
+```bash
+make render-mp4
+```
+
+Or fetch + render in one shot:
+
+```bash
+make temporal          # 240 snaps → ~10s MP4 @ 24fps
+make timelapse         # longer subsampled version
+make spatiotemporal    # 3D bin × time × liquidity view
+```
+
+**Simulated** — no RPC:
+
+```bash
+make render-mp4-demo   # simulate-series + render (~60s MP4 by default)
+```
+
+Or step by step:
+
+```bash
+make simulate-series
+make render-mp4-simulated
+```
+
+Or full-pipeline aliases:
+
+```bash
+make temporal-simulated
+make timelapse-simulated
+make spatiotemporal-simulated
+```
+
+**Compare dynamics (text report, not video):**
+
+```bash
+make compare-simulation
+```
+
+Useful knobs: `FRAME_DURATION`, `MP4_FPS` (for `render-mp4`); `SIM_COUNT`, `SIM_INTERVAL_SEC` (for simulated series length); `POOL=<address>` to override the default SOL-USDC pool. Run `make help` for the full list.
 
 ## Improvements
 
