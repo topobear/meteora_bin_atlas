@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Build a cron-style artifact factory for the venture: **continuous cinematic broadcasting of crypto geometry**.
+Build a cron-style artifact factory scoped to this.
 
 Meteora DLMM remains the first subject because it exposes real AMM geometry: discrete price bins, active-bin drift, token composition, reserve envelopes, and liquidity terrain. The repo should no longer be framed as only a cool visualization or a private research sketchbook. Each run should produce a compact public artifact that compounds into an archive of market-structure geometry over time.
 
@@ -19,7 +19,7 @@ The canonical output is a post-ready public drop:
 5. An append-only archive index.
 6. Links to the source snapshot series and metrics used to make the visual.
 
-This is **not** a 24/7 broadcaster. It should run a few times per day from cron or a manual operator command, avoiding always-on infra and minimizing exposure to RPC fragility.
+It should run a few times per day from cron or a manual operator command, avoiding always-on infra and minimizing exposure to RPC fragility.
 
 ---
 
