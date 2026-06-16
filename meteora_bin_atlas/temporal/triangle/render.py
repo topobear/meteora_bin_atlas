@@ -32,7 +32,6 @@ TRIANGLE_EDGE_COVERAGE = 0.92
 TRIANGLE_STRIP_WIDTH = 1800
 TRIANGLE_STRIP_HEIGHT = 1200
 TRIANGLE_STRIP_EDGE_GAP = 8
-LEG_LABEL_OFFSET = 132
 
 TRIANGLE_TOKEN_COLORS = {
     "X": "#FF9A24",
@@ -56,6 +55,9 @@ TRIANGLE_HISTORY = 36
 TRIANGLE_LANDSCAPE_STEP = 30
 TRIANGLE_LANDSCAPE_ALPHA = 90
 TRIANGLE_LANDSCAPE_RIDGE_ALPHA = 170
+RADAR_INNER_SCALE = 0.42
+RADAR_GUIDE_SCALE = 0.36
+RADAR_TRAIL_HISTORY = 120
 
 
 def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
@@ -145,24 +147,6 @@ def _inward_edge_normal(
     if (centroid[0] - mid_x) * nx + (centroid[1] - mid_y) * ny > 0:
         nx, ny = -nx, -ny
     return nx, ny
-
-
-def _outward_label_point(
-    start: tuple[float, float],
-    end: tuple[float, float],
-    *,
-    centroid: tuple[float, float],
-    offset: float,
-) -> tuple[float, float]:
-    mid_x = (start[0] + end[0]) / 2
-    mid_y = (start[1] + end[1]) / 2
-    dx = end[0] - start[0]
-    dy = end[1] - start[1]
-    length = math.hypot(dx, dy) or 1.0
-    nx, ny = -dy / length, dx / length
-    if (centroid[0] - mid_x) * nx + (centroid[1] - mid_y) * ny > 0:
-        nx, ny = -nx, -ny
-    return mid_x + nx * offset, mid_y + ny * offset
 
 
 def _prepare_leg_context(
@@ -283,21 +267,21 @@ def _draw_edge_price_ticker(
 
     overlay = Image.new("RGBA", strip.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay, "RGBA")
-    label_font = _load_mono_font(28)
+    label_font = _load_mono_font(36)
     price_font = _load_mono_font(60)
 
-    panel = [116, 10, 560, 164]
+    panel = [116, 8, 650, 184]
     draw.rectangle(panel, fill=(4, 7, 12, 228), outline=(*accent, 220), width=3)
     center_x = (panel[0] + panel[2]) / 2
     draw.text(
-        (center_x, panel[1] + 17),
+        (center_x, panel[1] + 18),
         f"{ctx.token_y}/{ctx.token_x}",
         fill=(175, 195, 215, 245),
         font=label_font,
         anchor="ma",
     )
     draw.text(
-        (center_x, panel[1] + 62),
+        (center_x, panel[1] + 86),
         _format_edge_price(float(spot_price)),
         fill=(*accent, 255),
         font=price_font,
@@ -476,6 +460,162 @@ def _paste_strip_on_edge(
     canvas.paste(rotated, (paste_x, paste_y), rotated)
 
 
+def _lerp_point(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    t: float,
+) -> tuple[float, float]:
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+
+def _point_toward(
+    point: tuple[float, float],
+    target: tuple[float, float],
+    scale_from_target: float,
+) -> tuple[float, float]:
+    return (
+        target[0] + (point[0] - target[0]) * scale_from_target,
+        target[1] + (point[1] - target[1]) * scale_from_target,
+    )
+
+
+def _active_fraction(ctx: LegRenderContext, trace_index: int) -> float:
+    frame = ctx.atlas_frame
+    span = max(1, int(frame.bin_id_max) - int(frame.bin_id_min))
+    active = int(ctx.traces[trace_index].active_bin_id)
+    return min(1.0, max(0.0, (active - int(frame.bin_id_min)) / span))
+
+
+def _radar_geometry(
+    leg_contexts: list[LegRenderContext],
+    vertices: dict[str, tuple[float, float]],
+    *,
+    centroid: tuple[float, float],
+    trace_index: int,
+) -> tuple[
+    list[tuple[LegRenderContext, tuple[float, float], tuple[float, float], tuple[int, int, int]]],
+    tuple[float, float],
+]:
+    spokes: list[tuple[LegRenderContext, tuple[float, float], tuple[float, float], tuple[int, int, int]]] = []
+    inner_points: list[tuple[float, float]] = []
+    for ctx in leg_contexts:
+        t = _active_fraction(ctx, trace_index)
+        start = vertices[ctx.leg.token_a]
+        end = vertices[ctx.leg.token_b]
+        outer = _lerp_point(start, end, t)
+        inner = _point_toward(outer, centroid, RADAR_INNER_SCALE)
+        color = (59, 167, 255) if t < 0.5 else (255, 154, 36)
+        spokes.append((ctx, outer, inner, color))
+        inner_points.append(inner)
+
+    balance = _triangle_centroid(inner_points)
+    return spokes, balance
+
+
+def _draw_center_radar(
+    canvas: Image.Image,
+    leg_contexts: list[LegRenderContext],
+    vertices: dict[str, tuple[float, float]],
+    *,
+    centroid: tuple[float, float],
+    current_index: int,
+    radar_history: list[tuple[float, float]],
+) -> None:
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    guide_vertices = [
+        _point_toward(point, centroid, RADAR_GUIDE_SCALE)
+        for point in vertices.values()
+    ]
+
+    # Static target geometry: rings, centerlines, and the arbitrage-free guide triangle.
+    for radius, alpha in ((52, 76), (116, 54), (190, 34)):
+        draw.ellipse(
+            [
+                centroid[0] - radius,
+                centroid[1] - radius,
+                centroid[0] + radius,
+                centroid[1] + radius,
+            ],
+            outline=(145, 178, 208, alpha),
+            width=2,
+        )
+    for point in guide_vertices:
+        draw.line([centroid, point], fill=(145, 178, 208, 50), width=2)
+    draw.polygon(guide_vertices, outline=(145, 178, 208, 82), fill=(10, 18, 28, 22))
+
+    spokes, balance = _radar_geometry(
+        leg_contexts,
+        vertices,
+        centroid=centroid,
+        trace_index=current_index,
+    )
+    inner_points = [inner for _ctx, _outer, inner, _color in spokes]
+
+    if len(inner_points) == 3:
+        draw.polygon(inner_points, fill=(8, 14, 22, 74), outline=(232, 244, 255, 104))
+
+    for _ctx, outer, inner, color in spokes:
+        draw.line([outer, inner], fill=(*color, 132), width=3)
+        draw.ellipse(
+            [outer[0] - 9, outer[1] - 9, outer[0] + 9, outer[1] + 9],
+            fill=(*color, 220),
+            outline=(255, 255, 255, 205),
+            width=2,
+        )
+        draw.ellipse(
+            [inner[0] - 6, inner[1] - 6, inner[0] + 6, inner[1] + 6],
+            fill=(232, 244, 255, 205),
+        )
+
+    trail = (radar_history + [balance])[-RADAR_TRAIL_HISTORY:]
+    if len(trail) >= 2:
+        for age, (p0, p1) in enumerate(zip(trail, trail[1:], strict=False)):
+            progress = (age + 1) / max(1, len(trail) - 1)
+            alpha = int(24 + 178 * progress)
+            width = 2 + int(4 * progress)
+            draw.line([p0, p1], fill=(232, 244, 255, alpha), width=width)
+    for age, point in enumerate(trail[:-1]):
+        progress = (age + 1) / max(1, len(trail))
+        radius = 3 + int(4 * progress)
+        alpha = int(24 + 118 * progress)
+        draw.ellipse(
+            [point[0] - radius, point[1] - radius, point[0] + radius, point[1] + radius],
+            fill=(59, 167, 255, alpha),
+        )
+
+    gap_x = balance[0] - centroid[0]
+    gap_y = balance[1] - centroid[1]
+    draw.line([centroid, balance], fill=(255, 154, 36, 154), width=3)
+    draw.line(
+        [(balance[0] - 34, balance[1]), (balance[0] + 34, balance[1])],
+        fill=(255, 255, 255, 220),
+        width=3,
+    )
+    draw.line(
+        [(balance[0], balance[1] - 34), (balance[0], balance[1] + 34)],
+        fill=(255, 255, 255, 220),
+        width=3,
+    )
+    draw.ellipse(
+        [balance[0] - 28, balance[1] - 28, balance[0] + 28, balance[1] + 28],
+        outline=(255, 255, 255, 235),
+        width=4,
+    )
+    draw.ellipse(
+        [balance[0] - 10, balance[1] - 10, balance[0] + 10, balance[1] + 10],
+        fill=(255, 154, 36, 245),
+        outline=(255, 255, 255, 245),
+        width=2,
+    )
+    if abs(gap_x) > 1 or abs(gap_y) > 1:
+        draw.ellipse(
+            [centroid[0] - 7, centroid[1] - 7, centroid[0] + 7, centroid[1] + 7],
+            fill=(145, 178, 208, 190),
+        )
+
+    radar_history.append(balance)
+
+
 def _draw_triangle_frame(
     spec: TriangleSpec,
     leg_contexts: list[LegRenderContext],
@@ -483,6 +623,7 @@ def _draw_triangle_frame(
     frame_index: int,
     display_frames: list[GlobalFrame | None],
     prior_indices: list[list[int]],
+    radar_history: list[tuple[float, float]],
     drift_window: int,
     dpi: int,
 ) -> np.ndarray:
@@ -538,11 +679,18 @@ def _draw_triangle_frame(
             fill=(100, 130, 160, 200),
             width=2,
         )
+    _draw_center_radar(
+        canvas,
+        leg_contexts,
+        vertices,
+        centroid=centroid,
+        current_index=current_index,
+        radar_history=radar_history,
+    )
 
     label_font = _load_mono_font(42)
     title_font = _load_mono_font(44)
     hud_font = _load_mono_font(30)
-    edge_label_font = _load_mono_font(68)
 
     for symbol, point in vertices.items():
         draw.ellipse(
@@ -558,37 +706,6 @@ def _draw_triangle_frame(
             symbol,
             fill=(232, 244, 255, 255),
             font=label_font,
-        )
-
-    for ctx, _strip, start, end in leg_strips:
-        leg_label = f"{ctx.leg.token_a}/{ctx.leg.token_b}"
-        lx, ly = _outward_label_point(
-            start,
-            end,
-            centroid=centroid,
-            offset=LEG_LABEL_OFFSET,
-        )
-        lb = draw.textbbox((0, 0), leg_label, font=edge_label_font)
-        lw = lb[2] - lb[0]
-        lh = lb[3] - lb[1]
-        pad_x, pad_y = 24, 14
-        panel = [
-            lx - lw / 2 - pad_x,
-            ly - lh / 2 - pad_y,
-            lx + lw / 2 + pad_x,
-            ly + lh / 2 + pad_y,
-        ]
-        draw.rectangle(
-            panel,
-            fill=(0, 0, 0, 180),
-            outline=(170, 195, 220, 185),
-            width=2,
-        )
-        draw.text(
-            (lx - lw / 2, ly - lh / 2),
-            leg_label,
-            fill=(232, 244, 255, 255),
-            font=edge_label_font,
         )
 
     title = f"CURRENCY TRIANGLE · {spec.triangle_id.upper().replace('_', '/')}"
@@ -635,6 +752,7 @@ def build_triangle_temporal_mp4(
 
     display_frames: list[GlobalFrame | None] = [None, None, None]
     prior_indices: list[list[int]] = [[], [], []]
+    radar_history: list[tuple[float, float]] = []
     frame_arrays: list[np.ndarray] = []
 
     for frame_index in range(n_frames):
@@ -645,6 +763,7 @@ def build_triangle_temporal_mp4(
                 frame_index=frame_index,
                 display_frames=display_frames,
                 prior_indices=prior_indices,
+                radar_history=radar_history,
                 drift_window=drift_window,
                 dpi=dpi,
             )
