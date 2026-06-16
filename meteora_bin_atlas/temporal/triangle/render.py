@@ -31,9 +31,9 @@ TRIANGLE_HEIGHT = 3400
 TRIANGLE_RADIUS = 860
 TRIANGLE_EDGE_COVERAGE = 0.86
 TRIANGLE_STRIP_WIDTH = 1800
-TRIANGLE_STRIP_HEIGHT = 360
+TRIANGLE_STRIP_HEIGHT = 420
 TRIANGLE_STRIP_EDGE_GAP = 8
-LEG_LABEL_OFFSET = 26
+LEG_LABEL_OFFSET = 98
 
 TRIANGLE_TOKEN_COLORS = {
     "X": "#FF335C",
@@ -43,8 +43,9 @@ TRIANGLE_TOKEN_COLORS = {
 }
 
 # Shorter skyline bars; active bin capped to neighbor heights.
-TRIANGLE_DEFLECTION_RATIO = 0.28
-TRIANGLE_LIQUIDITY_SCALE_HEADROOM = 2.85
+# Shorter than the standalone temporal view, but tall enough to read as a side ribbon.
+TRIANGLE_DEFLECTION_RATIO = 0.32
+TRIANGLE_LIQUIDITY_SCALE_HEADROOM = 2.65
 TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP = 1.0
 TRIANGLE_DRIFT_HEADROOM = 2.15
 TRIANGLE_DISPLAY_PAD_BINS = 2
@@ -222,6 +223,8 @@ def _render_leg_strip(
         token_color_mode="active_sides",
         highlight_active_bin=False,
         active_bin_neighbor_cap=TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP,
+        left_drift_color=(59, 167, 255),
+        right_drift_color=(255, 51, 92),
     )
     image = Image.fromarray(rgba, mode="RGBA")
     return image.crop(_plot_crop_box(width, height))
@@ -239,7 +242,7 @@ def _scale_strip_to_edge(strip: Image.Image, edge_length: float) -> Image.Image:
 
 
 def _plot_crop_box(width: int, height: int) -> tuple[int, int, int, int]:
-    return (20, 48, width - 12, height - 36)
+    return (12, 48, width - 12, height - 36)
 
 
 def _paste_strip_on_edge(
@@ -338,6 +341,7 @@ def _draw_triangle_frame(
     label_font = _load_mono_font(20)
     title_font = _load_mono_font(28)
     hud_font = _load_mono_font(18)
+    edge_label_font = _load_mono_font(26)
 
     for symbol, point in vertices.items():
         draw.ellipse(
@@ -363,14 +367,27 @@ def _draw_triangle_frame(
             centroid=centroid,
             offset=LEG_LABEL_OFFSET,
         )
-        lb = draw.textbbox((0, 0), leg_label, font=hud_font)
+        lb = draw.textbbox((0, 0), leg_label, font=edge_label_font)
         lw = lb[2] - lb[0]
         lh = lb[3] - lb[1]
+        pad_x, pad_y = 11, 6
+        panel = [
+            lx - lw / 2 - pad_x,
+            ly - lh / 2 - pad_y,
+            lx + lw / 2 + pad_x,
+            ly + lh / 2 + pad_y,
+        ]
+        draw.rectangle(
+            panel,
+            fill=(0, 0, 0, 180),
+            outline=(170, 195, 220, 150),
+            width=1,
+        )
         draw.text(
             (lx - lw / 2, ly - lh / 2),
             leg_label,
-            fill=(190, 210, 230, 220),
-            font=hud_font,
+            fill=(232, 244, 255, 255),
+            font=edge_label_font,
         )
 
     title = f"CURRENCY TRIANGLE · {spec.triangle_id.upper().replace('_', '/')}"

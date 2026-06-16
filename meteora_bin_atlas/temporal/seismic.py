@@ -885,7 +885,7 @@ def render_seismic_frame(
     palette = token_colors or SEISMIC_TOKEN_COLORS
 
     if edge_strip:
-        show_drift_strip = False
+        show_drift_strip = True
         compact_hud = True
 
     canvas_bg = (0, 0, 0, 0) if edge_strip else style.background + (255,)
@@ -917,9 +917,10 @@ def render_seismic_frame(
     max_deflection = (bottom - top) * (deflection_ratio if deflection_ratio is not None else CURRENT_DEFLECTION_RATIO)
     ghost_layers = _resolve_ghost_layers(current_index, ghost_indices)
 
+    ghost_trace_y_offset = GHOST_TRACE_Y_OFFSET * (3.2 if edge_strip else 1.0)
     for layer_index, layer_age in ghost_layers:
         layer = _layer_style(layer_age, transition_blend)
-        layer_trace_y = trace_y - layer_age * GHOST_TRACE_Y_OFFSET
+        layer_trace_y = trace_y - layer_age * ghost_trace_y_offset
         _draw_horizontal_wiggle_trace(
             draw,
             trace=traces[layer_index],
