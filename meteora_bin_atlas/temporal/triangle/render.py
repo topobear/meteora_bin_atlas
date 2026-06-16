@@ -479,11 +479,25 @@ def _point_toward(
     )
 
 
-def _active_fraction(ctx: LegRenderContext, trace_index: int) -> float:
-    frame = ctx.atlas_frame
-    span = max(1, int(frame.bin_id_max) - int(frame.bin_id_min))
+def _active_edge_fraction(
+    ctx: LegRenderContext,
+    trace_index: int,
+    frame: GlobalFrame,
+) -> float:
+    """Active bin x-position mapped onto the actual edge strip footprint."""
     active = int(ctx.traces[trace_index].active_bin_id)
-    return min(1.0, max(0.0, (active - int(frame.bin_id_min)) / span))
+    crop_left, _crop_top, crop_right, _crop_bottom = _plot_crop_box(
+        TRIANGLE_STRIP_WIDTH,
+        TRIANGLE_STRIP_HEIGHT,
+    )
+    strip_width = float(crop_right - crop_left)
+    plot_left = 112.0
+    plot_right = strip_width
+    cell_w = (plot_right - plot_left) / max(1, frame.n_bins)
+    bin_center_x = plot_left + (active - int(frame.bin_id_min) + 0.5) * cell_w
+    strip_fraction = min(1.0, max(0.0, bin_center_x / strip_width))
+    edge_pad = (1.0 - TRIANGLE_EDGE_COVERAGE) / 2.0
+    return min(1.0, max(0.0, edge_pad + strip_fraction * TRIANGLE_EDGE_COVERAGE))
 
 
 def _radar_geometry(
@@ -492,14 +506,15 @@ def _radar_geometry(
     *,
     centroid: tuple[float, float],
     trace_index: int,
+    display_frames: list[GlobalFrame],
 ) -> tuple[
     list[tuple[LegRenderContext, tuple[float, float], tuple[float, float], tuple[int, int, int]]],
     tuple[float, float],
 ]:
     spokes: list[tuple[LegRenderContext, tuple[float, float], tuple[float, float], tuple[int, int, int]]] = []
     inner_points: list[tuple[float, float]] = []
-    for ctx in leg_contexts:
-        t = _active_fraction(ctx, trace_index)
+    for ctx, frame in zip(leg_contexts, display_frames, strict=True):
+        t = _active_edge_fraction(ctx, trace_index, frame)
         start = vertices[ctx.leg.token_a]
         end = vertices[ctx.leg.token_b]
         outer = _lerp_point(start, end, t)
@@ -519,6 +534,7 @@ def _draw_center_radar(
     *,
     centroid: tuple[float, float],
     current_index: int,
+    display_frames: list[GlobalFrame],
     radar_history: list[tuple[float, float]],
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
@@ -548,6 +564,7 @@ def _draw_center_radar(
         vertices,
         centroid=centroid,
         trace_index=current_index,
+        display_frames=display_frames,
     )
     inner_points = [inner for _ctx, _outer, inner, _color in spokes]
 
@@ -679,12 +696,16 @@ def _draw_triangle_frame(
             fill=(100, 130, 160, 200),
             width=2,
         )
+    radar_display_frames = [frame for frame in display_frames if frame is not None]
+    if len(radar_display_frames) != len(leg_contexts):
+        raise RuntimeError("Radar requires one display frame per triangle leg")
     _draw_center_radar(
         canvas,
         leg_contexts,
         vertices,
         centroid=centroid,
         current_index=current_index,
+        display_frames=radar_display_frames,
         radar_history=radar_history,
     )
 
