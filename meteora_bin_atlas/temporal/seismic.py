@@ -37,8 +37,8 @@ GHOST_TRACE_X_DRIFT = 0.35
 
 # Sideways drift seismograph in the far-left margin: time runs top→bottom,
 # horizontal deflection = active bin's drift left/right from its series centre.
-DRIFT_STRIP_LEFT = 26
-DRIFT_STRIP_RIGHT = 116
+DRIFT_STRIP_LEFT = 18
+DRIFT_STRIP_RIGHT = 154
 DRIFT_STRIP_EDGE_PAD = 4.0
 # Centre baseline for the drift strip = trailing rolling mean of the active bin.
 DRIFT_ROLLING_WINDOW = 20

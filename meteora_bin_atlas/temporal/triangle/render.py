@@ -15,6 +15,7 @@ from meteora_bin_atlas.paths import DATA_PROCESSED, PLOTS_DIR
 from meteora_bin_atlas.temporal.render import resolve_token_labels
 from meteora_bin_atlas.temporal.reserve import build_price_map
 from meteora_bin_atlas.temporal.seismic import (
+    DRIFT_STRIP_RIGHT,
     DRIFT_WINDOW_SECONDS,
     GlobalFrame,
     compute_display_frame,
@@ -46,7 +47,7 @@ TRIANGLE_TOKEN_COLORS = {
 TRIANGLE_DEFLECTION_RATIO = 0.32
 TRIANGLE_LIQUIDITY_SCALE_HEADROOM = 2.65
 TRIANGLE_ACTIVE_BIN_NEIGHBOR_CAP = 1.0
-TRIANGLE_DRIFT_HEADROOM = 2.15
+TRIANGLE_DRIFT_HEADROOM = 1.28
 TRIANGLE_DISPLAY_PAD_BINS = 2
 TRIANGLE_MIN_DISPLAY_BINS = 12
 TRIANGLE_VIEWPORT_EDGE_BAND = 4
@@ -271,7 +272,8 @@ def _draw_edge_price_ticker(
     label_font = _load_mono_font(36)
     price_font = _load_mono_font(60)
 
-    panel = [116, 8, 650, 184]
+    panel_left = int(_strip_plot_left() + 8)
+    panel = [panel_left, 8, panel_left + 534, 184]
     draw.rectangle(panel, fill=(4, 7, 12, 228), outline=(*accent, 220), width=3)
     center_x = (panel[0] + panel[2]) / 2
     ask_label = ctx.leg.token_a
@@ -314,10 +316,18 @@ def _draw_edge_price_ticker(
 
 def _strip_bin_geometry(strip: Image.Image, frame: GlobalFrame) -> tuple[float, float, float]:
     # After cropping, the seismic plot starts just to the right of the drift panel.
-    plot_left = 112.0
+    plot_left = _strip_plot_left()
     plot_right = float(strip.width)
     cell_w = (plot_right - plot_left) / max(1, frame.n_bins)
     return plot_left, plot_right, cell_w
+
+
+def _strip_plot_left() -> float:
+    crop_left, _crop_top, _crop_right, _crop_bottom = _plot_crop_box(
+        TRIANGLE_STRIP_WIDTH,
+        TRIANGLE_STRIP_HEIGHT,
+    )
+    return float(DRIFT_STRIP_RIGHT + 8 - crop_left)
 
 
 def _strip_bin_color(bin_id: int, active_id: int) -> tuple[int, int, int]:
@@ -511,7 +521,7 @@ def _active_edge_fraction(
         TRIANGLE_STRIP_HEIGHT,
     )
     strip_width = float(crop_right - crop_left)
-    plot_left = 112.0
+    plot_left = _strip_plot_left()
     plot_right = strip_width
     cell_w = (plot_right - plot_left) / max(1, frame.n_bins)
     bin_center_x = plot_left + (active - int(frame.bin_id_min) + 0.5) * cell_w
@@ -564,7 +574,7 @@ def _draw_center_radar(
     ]
 
     # Static target geometry: rings, centerlines, and the arbitrage-free guide triangle.
-    for radius, alpha in ((52, 76), (116, 54), (190, 34)):
+    for radius, alpha in ((48, 100), (112, 72), (190, 42)):
         draw.ellipse(
             [
                 centroid[0] - radius,
@@ -575,9 +585,34 @@ def _draw_center_radar(
             outline=(145, 178, 208, alpha),
             width=2,
         )
+    for scale, alpha, width in ((0.14, 88, 2), (0.24, 76, 2), (RADAR_GUIDE_SCALE, 96, 3)):
+        ring = [_point_toward(point, centroid, scale) for point in vertices.values()]
+        draw.polygon(ring, outline=(145, 178, 208, alpha), fill=None, width=width)
     for point in guide_vertices:
-        draw.line([centroid, point], fill=(145, 178, 208, 50), width=2)
-    draw.polygon(guide_vertices, outline=(145, 178, 208, 82), fill=(10, 18, 28, 22))
+        draw.line([centroid, point], fill=(145, 178, 208, 72), width=2)
+    for i, point in enumerate(guide_vertices):
+        opposite_mid = _lerp_point(
+            guide_vertices[(i + 1) % 3],
+            guide_vertices[(i + 2) % 3],
+            0.5,
+        )
+        draw.line([point, opposite_mid], fill=(145, 178, 208, 42), width=1)
+    draw.line(
+        [(centroid[0] - 42, centroid[1]), (centroid[0] + 42, centroid[1])],
+        fill=(232, 244, 255, 112),
+        width=2,
+    )
+    draw.line(
+        [(centroid[0], centroid[1] - 42), (centroid[0], centroid[1] + 42)],
+        fill=(232, 244, 255, 112),
+        width=2,
+    )
+    draw.ellipse(
+        [centroid[0] - 12, centroid[1] - 12, centroid[0] + 12, centroid[1] + 12],
+        outline=(232, 244, 255, 158),
+        width=3,
+    )
+    draw.polygon(guide_vertices, outline=(145, 178, 208, 92), fill=(10, 18, 28, 18))
 
     spokes, balance = _radar_geometry(
         leg_contexts,
