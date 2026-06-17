@@ -67,8 +67,10 @@ RADAR_TRAIL_HISTORY = 120
 NO_ARB_DEAD_BAND_LOG = 0.003
 NO_ARB_VISUAL_LOG_RANGE = 0.05
 NO_ARB_PRESSURE_RADIUS = 178
+CYCLE_RING_RADIUS = 178
+CYCLE_PULSE_BASE_ANGLE = -math.pi / 2
 VERTEX_TICKER_WIDTH = 430
-VERTEX_TICKER_HEIGHT = 124
+VERTEX_TICKER_HEIGHT = 142
 
 
 def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
@@ -294,14 +296,33 @@ def _draw_edge_price_callout(
     crop_width = crop_right - crop_left
     crop_height = crop_bottom - crop_top
     scale = (edge_length * TRIANGLE_EDGE_COVERAGE) / max(1, crop_width)
-    strip_outer_offset = crop_height * scale + TRIANGLE_STRIP_EDGE_GAP
+    scaled_strip_width = crop_width * scale
+    scaled_strip_height = crop_height * scale
     outward_x, outward_y = _inward_edge_normal(start, end, centroid=centroid)
+    edge_unit_x = (end[0] - start[0]) / max(1e-9, edge_length)
+    edge_unit_y = (end[1] - start[1]) / max(1e-9, edge_length)
     mid_x = (start[0] + end[0]) / 2
     mid_y = (start[1] + end[1]) / 2
     panel_w = TRIANGLE_CALLOUT_WIDTH
     panel_h = TRIANGLE_CALLOUT_HEIGHT
-    center_x = mid_x + outward_x * (strip_outer_offset + panel_h / 2 + TRIANGLE_CALLOUT_GAP)
-    center_y = mid_y + outward_y * (strip_outer_offset + panel_h / 2 + TRIANGLE_CALLOUT_GAP)
+    strip_center_x = mid_x + outward_x * (scaled_strip_height / 2 + TRIANGLE_STRIP_EDGE_GAP)
+    strip_center_y = mid_y + outward_y * (scaled_strip_height / 2 + TRIANGLE_STRIP_EDGE_GAP)
+    drift_local_x = min(
+        scaled_strip_width - panel_w / 2,
+        max(panel_w / 2, _strip_plot_left() * 0.42 * scale),
+    )
+    drift_anchor_x = (
+        strip_center_x
+        + edge_unit_x * (drift_local_x - scaled_strip_width / 2)
+        + outward_x * (scaled_strip_height / 2 + 8)
+    )
+    drift_anchor_y = (
+        strip_center_y
+        + edge_unit_y * (drift_local_x - scaled_strip_width / 2)
+        + outward_y * (scaled_strip_height / 2 + 8)
+    )
+    center_x = drift_anchor_x + outward_x * (panel_h / 2 + 18)
+    center_y = drift_anchor_y + outward_y * (panel_h / 2 + 18)
     center_x = min(
         canvas.width - panel_w / 2 - 36,
         max(panel_w / 2 + 36, center_x),
@@ -317,10 +338,7 @@ def _draw_edge_price_callout(
         int(round(center_y + panel_h / 2)),
     ]
 
-    outer_anchor = (
-        mid_x + outward_x * (strip_outer_offset + 8),
-        mid_y + outward_y * (strip_outer_offset + 8),
-    )
+    outer_anchor = (drift_anchor_x, drift_anchor_y)
     panel_anchor = (
         center_x - outward_x * (panel_h / 2),
         center_y - outward_y * (panel_h / 2),
@@ -710,7 +728,12 @@ def _draw_vertex_rate_tickers(
     points = [vertices[symbol] for symbol in symbols]
     max_weight = max(vertex_weights) if vertex_weights else 1.0
     max_weight = max(max_weight, 1e-9)
-    visual_residual = min(abs(no_arb.residual_log), NO_ARB_VISUAL_LOG_RANGE)
+    visual_residual = max(
+        -NO_ARB_VISUAL_LOG_RANGE,
+        min(NO_ARB_VISUAL_LOG_RANGE, no_arb.residual_log),
+    )
+    cycle_ratio = math.exp(visual_residual)
+    reverse_ratio = 1.0 / cycle_ratio if cycle_ratio > 0 else 1.0
     draw = ImageDraw.Draw(canvas, "RGBA")
     label_font = _load_mono_font(22)
     ratio_font = _load_mono_font(38)
@@ -719,7 +742,6 @@ def _draw_vertex_rate_tickers(
         prev_symbol = symbols[(i - 1) % len(symbols)]
         next_symbol = symbols[(i + 1) % len(symbols)]
         local_pull = max(0.0, min(1.0, weight / max_weight))
-        local_ratio = math.exp(visual_residual * local_pull)
         panel = _vertex_ticker_position(canvas, point)
         alpha = int(96 + 118 * pressure * local_pull)
         outline = (150, 168, 188, 132)
@@ -744,7 +766,7 @@ def _draw_vertex_rate_tickers(
             font=label_font,
         )
 
-        ratio_text = f"{local_ratio:.4f}x"
+        ratio_text = f"{cycle_ratio:.4f}x"
         ratio_w = draw.textlength(ratio_text, font=ratio_font)
         ratio_fill = (*accent, 235) if direction != 0 else (202, 218, 235, 220)
         draw.text(
@@ -752,6 +774,14 @@ def _draw_vertex_rate_tickers(
             ratio_text,
             fill=ratio_fill,
             font=ratio_font,
+        )
+        reverse_text = f"reverse {reverse_ratio:.4f}x"
+        reverse_w = draw.textlength(reverse_text, font=label_font)
+        draw.text(
+            ((panel[0] + panel[2] - reverse_w) / 2, panel[1] + 112),
+            reverse_text,
+            fill=(150, 168, 188, 170),
+            font=label_font,
         )
 
         bar_left = panel[0] + 26
@@ -864,8 +894,8 @@ def _draw_center_radar(
         trace_index=current_index,
     )
 
-    # Static no-arb target geometry: center ring, guide triangle, and neutral band.
-    for radius, alpha in ((48, 100), (112, 72), (190, 42)):
+    # Static no-arb target geometry: gray cycle ring plus neutral band.
+    for radius, alpha in ((48, 100), (112, 72), (CYCLE_RING_RADIUS, 84)):
         draw.ellipse(
             [
                 centroid[0] - radius,
@@ -888,55 +918,50 @@ def _draw_center_radar(
         outline=(232, 244, 255, 132),
         width=2,
     )
-    for scale, alpha, width in ((0.14, 88, 2), (0.24, 76, 2), (RADAR_GUIDE_SCALE, 96, 3)):
-        ring = [_point_toward(point, centroid, scale) for point in vertices.values()]
-        draw.polygon(ring, outline=(145, 178, 208, alpha), fill=None, width=width)
-    for point in guide_vertices:
-        draw.line([centroid, point], fill=(145, 178, 208, 72), width=2)
-    for i, point in enumerate(guide_vertices):
-        opposite_mid = _lerp_point(
-            guide_vertices[(i + 1) % 3],
-            guide_vertices[(i + 2) % 3],
-            0.5,
+    for radius, alpha in ((CYCLE_RING_RADIUS * 0.52, 46), (CYCLE_RING_RADIUS * 0.76, 38)):
+        draw.ellipse(
+            [
+                centroid[0] - radius,
+                centroid[1] - radius,
+                centroid[0] + radius,
+                centroid[1] + radius,
+            ],
+            outline=(145, 178, 208, int(alpha)),
+            width=1,
         )
-        draw.line([point, opposite_mid], fill=(145, 178, 208, 42), width=1)
 
     if no_arb is not None:
-        for point, weight in zip(guide_vertices, vertex_weights, strict=True):
-            ray_alpha = int((34 + 205 * weight) * pressure)
-            if ray_alpha <= 0:
-                continue
-            draw.line(
-                [centroid, point],
-                fill=(*accent, ray_alpha),
-                width=2 + int(8 * weight * pressure),
+        pulse_alpha = 80 + int(155 * pressure)
+        pulse_width = 4 + int(7 * pressure)
+        sweep = 0.86 if direction >= 0 else -0.86
+        rotation = direction * (current_index * 0.18 + pressure * 0.7)
+        pulse_angle = CYCLE_PULSE_BASE_ANGLE + rotation
+        if pressure > 0:
+            _draw_arc_arrow(
+                draw,
+                center=centroid,
+                radius=CYCLE_RING_RADIUS,
+                start_angle=pulse_angle,
+                sweep=sweep,
+                color=accent,
+                alpha=pulse_alpha,
+                width=pulse_width,
             )
-            pulse_radius = 6 + int(22 * weight * pressure)
+            dot_angle = pulse_angle + sweep
+            dot_x = centroid[0] + math.cos(dot_angle) * CYCLE_RING_RADIUS
+            dot_y = centroid[1] + math.sin(dot_angle) * CYCLE_RING_RADIUS
+            dot_radius = 8 + int(12 * pressure)
             draw.ellipse(
                 [
-                    point[0] - pulse_radius,
-                    point[1] - pulse_radius,
-                    point[0] + pulse_radius,
-                    point[1] + pulse_radius,
+                    dot_x - dot_radius,
+                    dot_y - dot_radius,
+                    dot_x + dot_radius,
+                    dot_y + dot_radius,
                 ],
-                outline=(*accent, min(235, ray_alpha + 40)),
-                width=2 + int(4 * pressure),
+                fill=(*accent, min(245, pulse_alpha + 20)),
+                outline=(255, 255, 255, 205),
+                width=2,
             )
-
-        arrow_alpha = 48 + int(176 * pressure)
-        sweep = 0.78 if direction >= 0 else -0.78
-        if pressure > 0:
-            for start_angle in (-math.pi / 2, math.pi / 6, 5 * math.pi / 6):
-                _draw_arc_arrow(
-                    draw,
-                    center=centroid,
-                    radius=150,
-                    start_angle=start_angle,
-                    sweep=sweep,
-                    color=accent,
-                    alpha=arrow_alpha,
-                    width=3 + int(5 * pressure),
-                )
 
     draw.line(
         [(centroid[0] - 42, centroid[1]), (centroid[0] + 42, centroid[1])],
@@ -953,7 +978,6 @@ def _draw_center_radar(
         outline=(232, 244, 255, 158),
         width=3,
     )
-    draw.polygon(guide_vertices, outline=(145, 178, 208, 92), fill=(10, 18, 28, 18))
 
     if direction == 0:
         balance = centroid
