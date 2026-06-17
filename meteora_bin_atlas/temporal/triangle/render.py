@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +30,9 @@ from meteora_bin_atlas.temporal.triangle.resolve import TriangleLeg, TriangleSpe
 # Leg strips reuse the temporal seismic renderer, but as compact edge-facing plots.
 DEFAULT_LEG_DPI = 150
 TRIANGLE_WIDTH = 3600
-TRIANGLE_HEIGHT = 3400
+TRIANGLE_CONTENT_HEIGHT = 3400
+TRIANGLE_FOOTER_HEIGHT = 760
+TRIANGLE_HEIGHT = TRIANGLE_CONTENT_HEIGHT + TRIANGLE_FOOTER_HEIGHT
 TRIANGLE_RADIUS = 1040
 TRIANGLE_CENTER_Y_OFFSET = -150
 TRIANGLE_EDGE_COVERAGE = 0.92
@@ -117,8 +121,9 @@ def _triangle_vertices(
     height: int,
     radius: float,
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    _ = height
     cx = width / 2
-    cy = height / 2 + radius * 0.06 + TRIANGLE_CENTER_Y_OFFSET
+    cy = TRIANGLE_CONTENT_HEIGHT / 2 + radius * 0.06 + TRIANGLE_CENTER_Y_OFFSET
     top = (cx, cy - radius)
     bottom_left = (cx - radius * math.sqrt(3) / 2, cy + radius / 2)
     bottom_right = (cx + radius * math.sqrt(3) / 2, cy + radius / 2)
@@ -795,6 +800,209 @@ def _draw_vertex_rate_tickers(
         )
 
 
+@lru_cache(maxsize=16)
+def _render_mathtext_rgba(
+    equation: str,
+    *,
+    font_size: int,
+    color: tuple[int, int, int, int],
+) -> Image.Image | None:
+    """Render a Matplotlib mathtext equation to a transparent RGBA image."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+    except Exception:
+        return None
+
+    dpi = 100
+    fig = Figure(figsize=(16, 1.0), dpi=dpi, facecolor=(0, 0, 0, 0))
+    FigureCanvasAgg(fig)
+    ax = fig.add_axes((0, 0, 1, 1))
+    ax.axis("off")
+    rgba = tuple(channel / 255 for channel in color)
+    ax.text(
+        0,
+        0.52,
+        f"${equation}$",
+        color=rgba,
+        fontsize=font_size,
+        ha="left",
+        va="center",
+    )
+    buf = BytesIO()
+    fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.02)
+    buf.seek(0)
+    image = Image.open(buf).convert("RGBA")
+    bbox = image.getbbox()
+    if bbox is not None:
+        image = image.crop(bbox)
+    return image
+
+
+def _draw_mathtext_line(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    *,
+    equation: str,
+    x: int,
+    y: int,
+    max_width: int,
+    font_size: int,
+    fallback_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    color: tuple[int, int, int, int],
+    align: str = "left",
+) -> int:
+    image = _render_mathtext_rgba(equation, font_size=font_size, color=color)
+    draw_x = x
+    if image is None:
+        bbox = draw.textbbox((x, y), f"${equation}$", font=fallback_font)
+        if align == "center":
+            draw_x = x + max(0, (max_width - (bbox[2] - bbox[0])) // 2)
+        draw.text((draw_x, y), f"${equation}$", fill=color, font=fallback_font)
+        return bbox[3] - bbox[1] + 18
+    if image.width > max_width:
+        scale = max_width / image.width
+        image = image.resize(
+            (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    if align == "center":
+        draw_x = x + max(0, (max_width - image.width) // 2)
+    canvas.alpha_composite(image, (draw_x, y))
+    return image.height + 18
+
+
+def _draw_forward_kolmogorov_footer(canvas: Image.Image) -> None:
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    top = TRIANGLE_CONTENT_HEIGHT + 56
+    left = 120
+    right = canvas.width - 120
+    bottom = canvas.height - 56
+    title_font = _load_mono_font(34)
+    label_font = _load_mono_font(24)
+    equation_font = _load_mono_font(30)
+    note_font = _load_mono_font(26)
+    panel = [left, top - 24, right, bottom]
+    gutter = 52
+    inner_left = left + 42
+    inner_right = right - 42
+    column_width = int((inner_right - inner_left - gutter) / 2)
+    column_left = inner_left
+    column_right = inner_left + column_width + gutter
+    column_top = top + 88
+    no_arb_top = top + 382
+
+    draw.line(
+        [(left, TRIANGLE_CONTENT_HEIGHT + 26), (right, TRIANGLE_CONTENT_HEIGHT + 26)],
+        fill=(100, 130, 160, 96),
+        width=2,
+    )
+    draw.rectangle(
+        panel,
+        fill=(4, 7, 12, 164),
+        outline=(100, 130, 160, 132),
+        width=2,
+    )
+    draw.line(
+        [(column_right - gutter / 2, column_top - 22), (column_right - gutter / 2, no_arb_top - 24)],
+        fill=(100, 130, 160, 70),
+        width=2,
+    )
+    draw.line(
+        [(inner_left, no_arb_top - 22), (inner_right, no_arb_top - 22)],
+        fill=(100, 130, 160, 70),
+        width=2,
+    )
+    title = "STOCHASTIC NO-ARB EQUILIBRIUM"
+    title_w = draw.textlength(title, font=title_font)
+    draw.text(
+        ((canvas.width - title_w) / 2, top),
+        title,
+        fill=(190, 210, 230, 238),
+        font=title_font,
+    )
+
+    draw.text(
+        (column_left, column_top - 42),
+        "center as simplex diffusion",
+        fill=(150, 168, 188, 210),
+        font=label_font,
+    )
+    draw.text(
+        (column_right, column_top - 42),
+        "cycle ring as stochastic phase",
+        fill=(150, 168, 188, 210),
+        font=label_font,
+    )
+
+    left_equations = [
+        r"dP_t = Q(P_t)^{\top}P_t\,dt+\Sigma(P_t)\,dW_t",
+        r"P_t\in\Delta^2,\qquad \mathbf{1}^{\top}P_t=1",
+    ]
+    right_equations = [
+        r"d\theta_t=\kappa\tanh(\mathcal{A}_t/\epsilon)\,dt+\eta\,dB_t",
+        r"\mathcal{A}_t=\log\frac{q_{AB}q_{BC}q_{CA}}{q_{BA}q_{CB}q_{AC}}",
+    ]
+    y = column_top
+    for equation in left_equations:
+        y += _draw_mathtext_line(
+            canvas,
+            draw,
+            equation=equation,
+            x=column_left,
+            y=y,
+            max_width=column_width,
+            font_size=31,
+            fallback_font=equation_font,
+            color=(232, 244, 255, 242),
+            align="center",
+        )
+    y = column_top
+    for equation in right_equations:
+        y += _draw_mathtext_line(
+            canvas,
+            draw,
+            equation=equation,
+            x=column_right,
+            y=y,
+            max_width=column_width,
+            font_size=31,
+            fallback_font=equation_font,
+            color=(232, 244, 255, 242),
+            align="center",
+        )
+
+    no_arb_equations = [
+        r"\mathcal{A}_t=0 \Longleftrightarrow q_{AB}q_{BC}q_{CA}=q_{BA}q_{CB}q_{AC}",
+        r"\mathrm{detailed\ balance:}\quad \pi_iq_{ij}=\pi_jq_{ji}",
+    ]
+    y = no_arb_top + 18
+    for equation in no_arb_equations:
+        y += _draw_mathtext_line(
+            canvas,
+            draw,
+            equation=equation,
+            x=inner_left,
+            y=y,
+            max_width=inner_right - inner_left,
+            font_size=33,
+            fallback_font=equation_font,
+            color=(232, 244, 255, 242),
+            align="center",
+        )
+    note = "glyph = diffusion state; ring rotation = sign(A); pulse strength = |A| outside the neutral band"
+    note_w = draw.textlength(note, font=note_font)
+    draw.text(
+        ((canvas.width - note_w) / 2, bottom - 46),
+        note,
+        fill=(150, 168, 188, 190),
+        font=note_font,
+    )
+
+
 def _draw_arc_arrow(
     draw: ImageDraw.ImageDraw,
     *,
@@ -1168,6 +1376,7 @@ def _draw_triangle_frame(
         fill=(175, 195, 215, 230),
         font=hud_font,
     )
+    _draw_forward_kolmogorov_footer(canvas)
 
     return np.asarray(canvas.convert("RGB"))
 
