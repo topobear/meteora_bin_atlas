@@ -1003,7 +1003,7 @@ def render_seismic_frame(
             font=hud_font,
         )
 
-    if compact_hud:
+    if compact_hud and not edge_strip:
         title = f"{token_x}/{token_y}"
         subtitle = f"SNAP {current.snapshot_index + 1}/{total_traces}"
         compact_title_font = _load_mono_font(18)

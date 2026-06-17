@@ -30,10 +30,14 @@ DEFAULT_LEG_DPI = 150
 TRIANGLE_WIDTH = 3600
 TRIANGLE_HEIGHT = 3400
 TRIANGLE_RADIUS = 1040
+TRIANGLE_CENTER_Y_OFFSET = -150
 TRIANGLE_EDGE_COVERAGE = 0.92
 TRIANGLE_STRIP_WIDTH = 1800
 TRIANGLE_STRIP_HEIGHT = 1200
 TRIANGLE_STRIP_EDGE_GAP = 8
+TRIANGLE_CALLOUT_WIDTH = 540
+TRIANGLE_CALLOUT_HEIGHT = 154
+TRIANGLE_CALLOUT_GAP = 32
 
 TRIANGLE_TOKEN_COLORS = {
     "X": "#FF9A24",
@@ -99,7 +103,7 @@ def _triangle_vertices(
     radius: float,
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     cx = width / 2
-    cy = height / 2 + radius * 0.06
+    cy = height / 2 + radius * 0.06 + TRIANGLE_CENTER_Y_OFFSET
     top = (cx, cy - radius)
     bottom_left = (cx - radius * math.sqrt(3) / 2, cy + radius / 2)
     bottom_right = (cx + radius * math.sqrt(3) / 2, cy + radius / 2)
@@ -227,7 +231,6 @@ def _render_leg_strip(
         display_frame=display_frame,
         ghost_indices=ghost_indices,
     )
-    _draw_edge_price_ticker(strip, ctx=ctx, current_index=current_index)
     return strip
 
 
@@ -241,11 +244,14 @@ def _format_edge_price(price: float) -> str:
     return f"{price:.4g}"
 
 
-def _draw_edge_price_ticker(
-    strip: Image.Image,
+def _draw_edge_price_callout(
+    canvas: Image.Image,
     *,
     ctx: LegRenderContext,
     current_index: int,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    centroid: tuple[float, float],
 ) -> None:
     if not ctx.price_for_bin:
         return
@@ -267,22 +273,61 @@ def _draw_edge_price_ticker(
     else:
         accent = (180, 196, 214)
 
-    overlay = Image.new("RGBA", strip.size, (0, 0, 0, 0))
+    edge_length = math.hypot(end[0] - start[0], end[1] - start[1])
+    crop_left, crop_top, crop_right, crop_bottom = _plot_crop_box(
+        TRIANGLE_STRIP_WIDTH,
+        TRIANGLE_STRIP_HEIGHT,
+    )
+    crop_width = crop_right - crop_left
+    crop_height = crop_bottom - crop_top
+    scale = (edge_length * TRIANGLE_EDGE_COVERAGE) / max(1, crop_width)
+    strip_outer_offset = crop_height * scale + TRIANGLE_STRIP_EDGE_GAP
+    outward_x, outward_y = _inward_edge_normal(start, end, centroid=centroid)
+    mid_x = (start[0] + end[0]) / 2
+    mid_y = (start[1] + end[1]) / 2
+    panel_w = TRIANGLE_CALLOUT_WIDTH
+    panel_h = TRIANGLE_CALLOUT_HEIGHT
+    center_x = mid_x + outward_x * (strip_outer_offset + panel_h / 2 + TRIANGLE_CALLOUT_GAP)
+    center_y = mid_y + outward_y * (strip_outer_offset + panel_h / 2 + TRIANGLE_CALLOUT_GAP)
+    center_x = min(
+        canvas.width - panel_w / 2 - 36,
+        max(panel_w / 2 + 36, center_x),
+    )
+    center_y = min(
+        canvas.height - panel_h / 2 - 36,
+        max(panel_h / 2 + 124, center_y),
+    )
+    panel = [
+        int(round(center_x - panel_w / 2)),
+        int(round(center_y - panel_h / 2)),
+        int(round(center_x + panel_w / 2)),
+        int(round(center_y + panel_h / 2)),
+    ]
+
+    outer_anchor = (
+        mid_x + outward_x * (strip_outer_offset + 8),
+        mid_y + outward_y * (strip_outer_offset + 8),
+    )
+    panel_anchor = (
+        center_x - outward_x * (panel_h / 2),
+        center_y - outward_y * (panel_h / 2),
+    )
+
+    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay, "RGBA")
     label_font = _load_mono_font(36)
     price_font = _load_mono_font(60)
 
-    panel_left = int(_strip_plot_left() + 8)
-    panel = [panel_left, 8, panel_left + 534, 184]
+    draw.line([outer_anchor, panel_anchor], fill=(*accent, 136), width=3)
     draw.rectangle(panel, fill=(4, 7, 12, 228), outline=(*accent, 220), width=3)
-    center_x = (panel[0] + panel[2]) / 2
+    panel_center_x = (panel[0] + panel[2]) / 2
     ask_label = ctx.leg.token_a
     bid_label = ctx.leg.token_b
     slash = "/"
     ask_w = float(draw.textlength(ask_label, font=label_font))
     slash_w = float(draw.textlength(slash, font=label_font))
     bid_w = float(draw.textlength(bid_label, font=label_font))
-    label_x = center_x - (ask_w + slash_w + bid_w) / 2
+    label_x = panel_center_x - (ask_w + slash_w + bid_w) / 2
     label_y = panel[1] + 18
     draw.text(
         (label_x, label_y),
@@ -303,15 +348,13 @@ def _draw_edge_price_ticker(
         font=label_font,
     )
     draw.text(
-        (center_x, panel[1] + 86),
+        (panel_center_x, panel[1] + 82),
         _format_edge_price(float(spot_price)),
         fill=(*accent, 255),
         font=price_font,
         anchor="ma",
     )
-    # The whole strip is flipped before being pasted outward. Pre-flip the text
-    # overlay so the final edge-local ticker stays readable.
-    strip.alpha_composite(overlay.transpose(Image.Transpose.FLIP_TOP_BOTTOM))
+    canvas.alpha_composite(overlay)
 
 
 def _strip_bin_geometry(strip: Image.Image, frame: GlobalFrame) -> tuple[float, float, float]:
@@ -763,6 +806,15 @@ def _draw_triangle_frame(
         display_frames=radar_display_frames,
         radar_history=radar_history,
     )
+    for ctx, _strip, start, end in leg_strips:
+        _draw_edge_price_callout(
+            canvas,
+            ctx=ctx,
+            current_index=current_index,
+            start=start,
+            end=end,
+            centroid=centroid,
+        )
 
     label_font = _load_mono_font(42)
     title_font = _load_mono_font(44)
