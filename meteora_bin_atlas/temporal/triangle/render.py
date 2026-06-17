@@ -64,6 +64,11 @@ TRIANGLE_LANDSCAPE_RIDGE_ALPHA = 170
 RADAR_INNER_SCALE = 0.42
 RADAR_GUIDE_SCALE = 0.36
 RADAR_TRAIL_HISTORY = 120
+NO_ARB_DEAD_BAND_LOG = 0.003
+NO_ARB_VISUAL_LOG_RANGE = 0.05
+NO_ARB_PRESSURE_RADIUS = 178
+VERTEX_TICKER_WIDTH = 430
+VERTEX_TICKER_HEIGHT = 124
 
 
 def _leg_strip_dimensions(dpi: int) -> tuple[int, int]:
@@ -81,6 +86,14 @@ class LegRenderContext:
     token_x: str
     token_y: str
     price_for_bin: dict[int, float]
+
+
+@dataclass(frozen=True)
+class NoArbState:
+    edge_prices: tuple[float, float, float]
+    log_prices: tuple[float, float, float]
+    projected_log_prices: tuple[float, float, float]
+    residual_log: float
 
 
 def _load_mono_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -573,6 +586,222 @@ def _active_edge_fraction(
     return min(1.0, max(0.0, edge_pad + strip_fraction * TRIANGLE_EDGE_COVERAGE))
 
 
+def _directed_active_price(ctx: LegRenderContext, trace_index: int) -> float | None:
+    if not ctx.price_for_bin:
+        return None
+    trace = ctx.traces[trace_index]
+    raw_price = ctx.price_for_bin.get(int(trace.active_bin_id))
+    if raw_price is None or raw_price <= 0:
+        return None
+    if ctx.leg.flip_display:
+        return 1.0 / float(raw_price)
+    return float(raw_price)
+
+
+def _compute_no_arb_state(
+    leg_contexts: list[LegRenderContext],
+    *,
+    trace_index: int,
+) -> NoArbState | None:
+    prices: list[float] = []
+    for ctx in leg_contexts:
+        price = _directed_active_price(ctx, trace_index)
+        if price is None or price <= 0:
+            return None
+        prices.append(price)
+
+    logs = tuple(math.log(price) for price in prices)
+    residual = sum(logs)
+    projected = tuple(log_price - residual / 3.0 for log_price in logs)
+    return NoArbState(
+        edge_prices=(prices[0], prices[1], prices[2]),
+        log_prices=(logs[0], logs[1], logs[2]),
+        projected_log_prices=(projected[0], projected[1], projected[2]),
+        residual_log=residual,
+    )
+
+
+def _no_arb_pressure(residual_log: float) -> tuple[float, int]:
+    magnitude = abs(residual_log)
+    if magnitude <= NO_ARB_DEAD_BAND_LOG:
+        return 0.0, 0
+    pressure = (magnitude - NO_ARB_DEAD_BAND_LOG) / max(
+        1e-9,
+        NO_ARB_VISUAL_LOG_RANGE - NO_ARB_DEAD_BAND_LOG,
+    )
+    return min(1.0, pressure), 1 if residual_log > 0 else -1
+
+
+def _active_liquidity_weight(ctx: LegRenderContext, trace_index: int) -> float:
+    trace = ctx.traces[trace_index]
+    active_id = int(trace.active_bin_id)
+    liquidity = 0.0
+    for bin_id, bin_liquidity in zip(trace.bin_ids, trace.liquidity, strict=True):
+        if int(bin_id) == active_id:
+            liquidity = max(0.0, float(bin_liquidity))
+            break
+    normalised = liquidity / max(1e-9, ctx.liquidity_scale)
+    return max(0.02, normalised)
+
+
+def _vertex_pressure_weights(
+    leg_contexts: list[LegRenderContext],
+    *,
+    trace_index: int,
+) -> tuple[float, float, float]:
+    """Attribute the global no-arb residual to vertices via opposite-leg weakness.
+
+    With only three active prices, each two-hop/direct comparison is the same
+    residual. The visual attribution chooses the vertex opposite the leg where
+    local active-bin depth is weakest, i.e. the least supported place for the
+    triangle to close.
+    """
+    leg_depths = [
+        _active_liquidity_weight(ctx, trace_index)
+        for ctx in leg_contexts
+    ]
+    # Vertex 0 is opposite leg 1, vertex 1 opposite leg 2, vertex 2 opposite leg 0.
+    weakness = (
+        1.0 / leg_depths[1],
+        1.0 / leg_depths[2],
+        1.0 / leg_depths[0],
+    )
+    total = sum(weakness)
+    if total <= 0:
+        return (1 / 3, 1 / 3, 1 / 3)
+    return tuple(value / total for value in weakness)  # type: ignore[return-value]
+
+
+def _weighted_point(
+    points: list[tuple[float, float]],
+    weights: tuple[float, float, float],
+) -> tuple[float, float]:
+    return (
+        sum(point[0] * weight for point, weight in zip(points, weights, strict=True)),
+        sum(point[1] * weight for point, weight in zip(points, weights, strict=True)),
+    )
+
+
+def _vertex_ticker_position(
+    canvas: Image.Image,
+    point: tuple[float, float],
+) -> tuple[int, int, int, int]:
+    left = int(round(point[0] - VERTEX_TICKER_WIDTH / 2))
+    top = int(round(point[1] - VERTEX_TICKER_HEIGHT - 76))
+    left = max(36, min(canvas.width - VERTEX_TICKER_WIDTH - 36, left))
+    top = max(130, min(canvas.height - VERTEX_TICKER_HEIGHT - 36, top))
+    return (left, top, left + VERTEX_TICKER_WIDTH, top + VERTEX_TICKER_HEIGHT)
+
+
+def _draw_vertex_rate_tickers(
+    canvas: Image.Image,
+    vertices: dict[str, tuple[float, float]],
+    *,
+    no_arb: NoArbState | None,
+    vertex_weights: tuple[float, float, float],
+    pressure: float,
+    direction: int,
+    accent: tuple[int, int, int],
+) -> None:
+    if no_arb is None:
+        return
+
+    symbols = list(vertices.keys())
+    points = [vertices[symbol] for symbol in symbols]
+    max_weight = max(vertex_weights) if vertex_weights else 1.0
+    max_weight = max(max_weight, 1e-9)
+    visual_residual = min(abs(no_arb.residual_log), NO_ARB_VISUAL_LOG_RANGE)
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    label_font = _load_mono_font(22)
+    ratio_font = _load_mono_font(38)
+
+    for i, (symbol, point, weight) in enumerate(zip(symbols, points, vertex_weights, strict=True)):
+        prev_symbol = symbols[(i - 1) % len(symbols)]
+        next_symbol = symbols[(i + 1) % len(symbols)]
+        local_pull = max(0.0, min(1.0, weight / max_weight))
+        local_ratio = math.exp(visual_residual * local_pull)
+        panel = _vertex_ticker_position(canvas, point)
+        alpha = int(96 + 118 * pressure * local_pull)
+        outline = (150, 168, 188, 132)
+        if pressure > 0 and local_pull > 0.72:
+            outline = (*accent, min(220, alpha + 20))
+        draw.rectangle(panel, fill=(4, 7, 12, 210), outline=outline, width=2)
+
+        route = f"{prev_symbol}>{symbol}>{next_symbol}"
+        direct = f"vs {prev_symbol}>{next_symbol}"
+        route_w = draw.textlength(route, font=label_font)
+        direct_w = draw.textlength(direct, font=label_font)
+        draw.text(
+            ((panel[0] + panel[2] - route_w) / 2, panel[1] + 14),
+            route,
+            fill=(202, 218, 235, 216),
+            font=label_font,
+        )
+        draw.text(
+            ((panel[0] + panel[2] - direct_w) / 2, panel[1] + 42),
+            direct,
+            fill=(150, 168, 188, 190),
+            font=label_font,
+        )
+
+        ratio_text = f"{local_ratio:.4f}x"
+        ratio_w = draw.textlength(ratio_text, font=ratio_font)
+        ratio_fill = (*accent, 235) if direction != 0 else (202, 218, 235, 220)
+        draw.text(
+            ((panel[0] + panel[2] - ratio_w) / 2, panel[1] + 72),
+            ratio_text,
+            fill=ratio_fill,
+            font=ratio_font,
+        )
+
+        bar_left = panel[0] + 26
+        bar_right = panel[2] - 26
+        bar_y = panel[3] - 10
+        draw.line([(bar_left, bar_y), (bar_right, bar_y)], fill=(150, 168, 188, 54), width=2)
+        draw.line(
+            [(bar_left, bar_y), (bar_left + (bar_right - bar_left) * local_pull * pressure, bar_y)],
+            fill=(*accent, 178),
+            width=3,
+        )
+
+
+def _draw_arc_arrow(
+    draw: ImageDraw.ImageDraw,
+    *,
+    center: tuple[float, float],
+    radius: float,
+    start_angle: float,
+    sweep: float,
+    color: tuple[int, int, int],
+    alpha: int,
+    width: int,
+) -> None:
+    steps = 18
+    angles = [start_angle + sweep * i / steps for i in range(steps + 1)]
+    points = [
+        (center[0] + math.cos(angle) * radius, center[1] + math.sin(angle) * radius)
+        for angle in angles
+    ]
+    draw.line(points, fill=(*color, alpha), width=width, joint="curve")
+    end = points[-1]
+    prev = points[-2]
+    tangent = math.atan2(end[1] - prev[1], end[0] - prev[0])
+    head_len = 18 + width
+    spread = 0.62
+    head = [
+        end,
+        (
+            end[0] - math.cos(tangent - spread) * head_len,
+            end[1] - math.sin(tangent - spread) * head_len,
+        ),
+        (
+            end[0] - math.cos(tangent + spread) * head_len,
+            end[1] - math.sin(tangent + spread) * head_len,
+        ),
+    ]
+    draw.polygon(head, fill=(*color, alpha))
+
+
 def _radar_geometry(
     leg_contexts: list[LegRenderContext],
     vertices: dict[str, tuple[float, float]],
@@ -615,8 +844,27 @@ def _draw_center_radar(
         _point_toward(point, centroid, RADAR_GUIDE_SCALE)
         for point in vertices.values()
     ]
+    no_arb = _compute_no_arb_state(leg_contexts, trace_index=current_index)
+    pressure, direction = (
+        _no_arb_pressure(no_arb.residual_log)
+        if no_arb is not None
+        else (0.0, 0)
+    )
+    if direction > 0:
+        accent = (255, 154, 36)
+        counter = (59, 167, 255)
+    elif direction < 0:
+        accent = (59, 167, 255)
+        counter = (255, 154, 36)
+    else:
+        accent = (232, 244, 255)
+        counter = (145, 178, 208)
+    vertex_weights = _vertex_pressure_weights(
+        leg_contexts,
+        trace_index=current_index,
+    )
 
-    # Static target geometry: rings, centerlines, and the arbitrage-free guide triangle.
+    # Static no-arb target geometry: center ring, guide triangle, and neutral band.
     for radius, alpha in ((48, 100), (112, 72), (190, 42)):
         draw.ellipse(
             [
@@ -628,6 +876,18 @@ def _draw_center_radar(
             outline=(145, 178, 208, alpha),
             width=2,
         )
+    dead_band_radius = 34
+    draw.ellipse(
+        [
+            centroid[0] - dead_band_radius,
+            centroid[1] - dead_band_radius,
+            centroid[0] + dead_band_radius,
+            centroid[1] + dead_band_radius,
+        ],
+        fill=(10, 18, 28, 62),
+        outline=(232, 244, 255, 132),
+        width=2,
+    )
     for scale, alpha, width in ((0.14, 88, 2), (0.24, 76, 2), (RADAR_GUIDE_SCALE, 96, 3)):
         ring = [_point_toward(point, centroid, scale) for point in vertices.values()]
         draw.polygon(ring, outline=(145, 178, 208, alpha), fill=None, width=width)
@@ -640,6 +900,44 @@ def _draw_center_radar(
             0.5,
         )
         draw.line([point, opposite_mid], fill=(145, 178, 208, 42), width=1)
+
+    if no_arb is not None:
+        for point, weight in zip(guide_vertices, vertex_weights, strict=True):
+            ray_alpha = int((34 + 205 * weight) * pressure)
+            if ray_alpha <= 0:
+                continue
+            draw.line(
+                [centroid, point],
+                fill=(*accent, ray_alpha),
+                width=2 + int(8 * weight * pressure),
+            )
+            pulse_radius = 6 + int(22 * weight * pressure)
+            draw.ellipse(
+                [
+                    point[0] - pulse_radius,
+                    point[1] - pulse_radius,
+                    point[0] + pulse_radius,
+                    point[1] + pulse_radius,
+                ],
+                outline=(*accent, min(235, ray_alpha + 40)),
+                width=2 + int(4 * pressure),
+            )
+
+        arrow_alpha = 48 + int(176 * pressure)
+        sweep = 0.78 if direction >= 0 else -0.78
+        if pressure > 0:
+            for start_angle in (-math.pi / 2, math.pi / 6, 5 * math.pi / 6):
+                _draw_arc_arrow(
+                    draw,
+                    center=centroid,
+                    radius=150,
+                    start_angle=start_angle,
+                    sweep=sweep,
+                    color=accent,
+                    alpha=arrow_alpha,
+                    width=3 + int(5 * pressure),
+                )
+
     draw.line(
         [(centroid[0] - 42, centroid[1]), (centroid[0] + 42, centroid[1])],
         fill=(232, 244, 255, 112),
@@ -657,50 +955,40 @@ def _draw_center_radar(
     )
     draw.polygon(guide_vertices, outline=(145, 178, 208, 92), fill=(10, 18, 28, 18))
 
-    spokes, balance = _radar_geometry(
-        leg_contexts,
-        vertices,
-        centroid=centroid,
-        trace_index=current_index,
-        display_frames=display_frames,
-    )
-    inner_points = [inner for _ctx, _outer, inner, _color in spokes]
-
-    if len(inner_points) == 3:
-        draw.polygon(inner_points, fill=(8, 14, 22, 74), outline=(232, 244, 255, 104))
-
-    for _ctx, outer, inner, color in spokes:
-        draw.line([outer, inner], fill=(*color, 132), width=3)
-        draw.ellipse(
-            [outer[0] - 9, outer[1] - 9, outer[0] + 9, outer[1] + 9],
-            fill=(*color, 220),
-            outline=(255, 255, 255, 205),
-            width=2,
-        )
-        draw.ellipse(
-            [inner[0] - 6, inner[1] - 6, inner[0] + 6, inner[1] + 6],
-            fill=(232, 244, 255, 205),
-        )
+    if direction == 0:
+        balance = centroid
+    else:
+        target = _weighted_point(guide_vertices, vertex_weights)
+        tx = target[0] - centroid[0]
+        ty = target[1] - centroid[1]
+        length = math.hypot(tx, ty)
+        if length <= 1:
+            marker_radius = dead_band_radius + pressure * NO_ARB_PRESSURE_RADIUS
+            balance = (centroid[0], centroid[1] - direction * marker_radius)
+        else:
+            pull = 0.18 + 0.82 * pressure
+            balance = (centroid[0] + tx * pull, centroid[1] + ty * pull)
 
     trail = (radar_history + [balance])[-RADAR_TRAIL_HISTORY:]
     if len(trail) >= 2:
         for age, (p0, p1) in enumerate(zip(trail, trail[1:], strict=False)):
             progress = (age + 1) / max(1, len(trail) - 1)
-            alpha = int(24 + 178 * progress)
-            width = 2 + int(4 * progress)
-            draw.line([p0, p1], fill=(232, 244, 255, alpha), width=width)
+            alpha = int(18 + 168 * progress)
+            width = 2 + int(5 * progress)
+            draw.line([p0, p1], fill=(*accent, alpha), width=width)
     for age, point in enumerate(trail[:-1]):
         progress = (age + 1) / max(1, len(trail))
         radius = 3 + int(4 * progress)
         alpha = int(24 + 118 * progress)
         draw.ellipse(
             [point[0] - radius, point[1] - radius, point[0] + radius, point[1] + radius],
-            fill=(59, 167, 255, alpha),
+            fill=(*counter, alpha),
         )
 
     gap_x = balance[0] - centroid[0]
     gap_y = balance[1] - centroid[1]
-    draw.line([centroid, balance], fill=(255, 154, 36, 154), width=3)
+    if direction != 0:
+        draw.line([centroid, balance], fill=(*accent, 96 + int(112 * pressure)), width=3)
     draw.line(
         [(balance[0] - 34, balance[1]), (balance[0] + 34, balance[1])],
         fill=(255, 255, 255, 220),
@@ -713,12 +1001,12 @@ def _draw_center_radar(
     )
     draw.ellipse(
         [balance[0] - 28, balance[1] - 28, balance[0] + 28, balance[1] + 28],
-        outline=(255, 255, 255, 235),
+        outline=(*accent, 235),
         width=4,
     )
     draw.ellipse(
         [balance[0] - 10, balance[1] - 10, balance[0] + 10, balance[1] + 10],
-        fill=(255, 154, 36, 245),
+        fill=(*accent, 245),
         outline=(255, 255, 255, 245),
         width=2,
     )
@@ -727,6 +1015,16 @@ def _draw_center_radar(
             [centroid[0] - 7, centroid[1] - 7, centroid[0] + 7, centroid[1] + 7],
             fill=(145, 178, 208, 190),
         )
+
+    _draw_vertex_rate_tickers(
+        canvas,
+        vertices,
+        no_arb=no_arb,
+        vertex_weights=vertex_weights,
+        pressure=pressure,
+        direction=direction,
+        accent=accent,
+    )
 
     radar_history.append(balance)
 
