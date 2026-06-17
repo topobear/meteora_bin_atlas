@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -1079,11 +1080,26 @@ def encode_mp4(frames: list[np.ndarray], output_path: Path, *, fps: int) -> None
         raise ValueError("No frames to encode")
 
     height, width, _ = frames[0].shape
+    encode_mp4_stream(frames, output_path, fps=fps, width=width, height=height)
+
+
+def encode_mp4_stream(
+    frames: Iterable[np.ndarray],
+    output_path: Path,
+    *,
+    fps: int,
+    width: int,
+    height: int,
+) -> int:
+    """Write RGB frames to MP4 without retaining the full video in memory."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         "ffmpeg",
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-f",
         "rawvideo",
         "-vcodec",
@@ -1107,6 +1123,7 @@ def encode_mp4(frames: list[np.ndarray], output_path: Path, *, fps: int) -> None
     ]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     assert proc.stdin is not None
+    frame_count = 0
     try:
         for frame in frames:
             if frame.shape != (height, width, 3):
@@ -1114,6 +1131,7 @@ def encode_mp4(frames: list[np.ndarray], output_path: Path, *, fps: int) -> None
                     f"Frame shape mismatch: expected {(height, width, 3)}, got {frame.shape}"
                 )
             proc.stdin.write(frame.astype(np.uint8).tobytes())
+            frame_count += 1
     finally:
         proc.stdin.close()
         stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
@@ -1121,3 +1139,6 @@ def encode_mp4(frames: list[np.ndarray], output_path: Path, *, fps: int) -> None
 
     if return_code != 0:
         raise RuntimeError(f"ffmpeg failed ({return_code}): {stderr[-2000:]}")
+    if frame_count == 0:
+        raise ValueError("No frames to encode")
+    return frame_count

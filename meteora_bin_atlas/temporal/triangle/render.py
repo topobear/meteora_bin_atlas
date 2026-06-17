@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from meteora_bin_atlas.temporal.seismic import (
     DRIFT_WINDOW_SECONDS,
     GlobalFrame,
     compute_display_frame,
-    encode_mp4,
+    encode_mp4_stream,
     prepare_snapshot_traces,
     render_seismic_frame,
 )
@@ -273,12 +274,31 @@ def _draw_edge_price_ticker(
     panel = [116, 8, 650, 184]
     draw.rectangle(panel, fill=(4, 7, 12, 228), outline=(*accent, 220), width=3)
     center_x = (panel[0] + panel[2]) / 2
+    ask_label = ctx.leg.token_a
+    bid_label = ctx.leg.token_b
+    slash = "/"
+    ask_w = float(draw.textlength(ask_label, font=label_font))
+    slash_w = float(draw.textlength(slash, font=label_font))
+    bid_w = float(draw.textlength(bid_label, font=label_font))
+    label_x = center_x - (ask_w + slash_w + bid_w) / 2
+    label_y = panel[1] + 18
     draw.text(
-        (center_x, panel[1] + 18),
-        f"{ctx.token_y}/{ctx.token_x}",
-        fill=(175, 195, 215, 245),
+        (label_x, label_y),
+        ask_label,
+        fill=(59, 167, 255, 255),
         font=label_font,
-        anchor="ma",
+    )
+    draw.text(
+        (label_x + ask_w, label_y),
+        slash,
+        fill=(202, 218, 235, 245),
+        font=label_font,
+    )
+    draw.text(
+        (label_x + ask_w + slash_w, label_y),
+        bid_label,
+        fill=(255, 154, 36, 255),
+        font=label_font,
     )
     draw.text(
         (center_x, panel[1] + 86),
@@ -774,21 +794,6 @@ def build_triangle_temporal_mp4(
     display_frames: list[GlobalFrame | None] = [None, None, None]
     prior_indices: list[list[int]] = [[], [], []]
     radar_history: list[tuple[float, float]] = []
-    frame_arrays: list[np.ndarray] = []
-
-    for frame_index in range(n_frames):
-        frame_arrays.append(
-            _draw_triangle_frame(
-                spec,
-                leg_contexts,
-                frame_index=frame_index,
-                display_frames=display_frames,
-                prior_indices=prior_indices,
-                radar_history=radar_history,
-                drift_window=drift_window,
-                dpi=dpi,
-            )
-        )
 
     if output_path is None:
         PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -798,6 +803,26 @@ def build_triangle_temporal_mp4(
         output_path = PLOTS_DIR / f"triangle_temporal_{spec.triangle_id}_{ts}.mp4"
 
     output_path = output_path.resolve()
-    encode_mp4(frame_arrays, output_path, fps=fps)
+    def _frames() -> Iterable[np.ndarray]:
+        for frame_index in range(n_frames):
+            yield _draw_triangle_frame(
+                spec,
+                leg_contexts,
+                frame_index=frame_index,
+                display_frames=display_frames,
+                prior_indices=prior_indices,
+                radar_history=radar_history,
+                drift_window=drift_window,
+                dpi=dpi,
+            )
+
+    frame_count = encode_mp4_stream(
+        _frames(),
+        output_path,
+        fps=fps,
+        width=TRIANGLE_WIDTH,
+        height=TRIANGLE_HEIGHT,
+    )
     print(f"Triangle MP4: {output_path}")
+    print(f"  streamed {frame_count} frames @ {fps} fps")
     return output_path
