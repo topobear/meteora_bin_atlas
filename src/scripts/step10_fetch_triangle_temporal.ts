@@ -36,6 +36,20 @@ function getPositiveFlagNumber(flag: string, defaultValue: number, label: string
   return Math.trunc(value);
 }
 
+function getOptionalNonNegativeFlagNumber(flag: string, label: string): number | undefined {
+  const raw = getFlagValue(flag);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative number.`);
+  }
+
+  return value;
+}
+
 function getFlagNumber(flag: string, defaultValue: number, label: string): number {
   const raw = getFlagValue(flag);
   const value = raw ? Number(raw) : defaultValue;
@@ -71,13 +85,10 @@ async function main(): Promise<void> {
     : path.join(process.cwd(), "data", "triangles", `${triangleFlag}.json`);
   const countPerLeg = getPositiveFlagNumber("--count", 240, "--count");
   const intervalSec =
-    getFlagValue("--interval-sec") !== undefined
-      ? getPositiveFlagNumber("--interval-sec", rpcDataset.intervalSec, "--interval-sec")
-      : rpcDataset.intervalSec;
+    getOptionalNonNegativeFlagNumber("--interval-sec", "--interval-sec") ?? rpcDataset.intervalSec;
   const rpcBackoffSec =
-    getFlagValue("--rpc-backoff-sec") !== undefined
-      ? getPositiveFlagNumber("--rpc-backoff-sec", rpcDataset.rpcBackoffSec, "--rpc-backoff-sec")
-      : rpcDataset.rpcBackoffSec;
+    getOptionalNonNegativeFlagNumber("--rpc-backoff-sec", "--rpc-backoff-sec") ??
+    rpcDataset.rpcBackoffSec;
   const binsLeft = getFlagNumber("--bins-left", 30, "--bins-left");
   const binsRight = getFlagNumber("--bins-right", 30, "--bins-right");
 
