@@ -11,6 +11,7 @@ import {
   fetchTriangleSeries,
   type TriangleLegInput,
 } from "../meteora/fetchTriangleSeries.js";
+import { resolveSnapshotCacheConfig } from "../meteora/snapshotCache.js";
 import { normalizeTriangleSeries } from "../meteora/normalizeTriangleSeries.js";
 import {
   loadTrianglePreset,
@@ -149,6 +150,7 @@ async function main(): Promise<void> {
       projectRoot,
       dataset,
       bounded: { left: binsLeft, right: binsRight },
+      cache: resolveSnapshotCacheConfig(),
     });
   } catch (error: unknown) {
     if (error instanceof RpcDatasetAbortError || isRpcDatasetError(error)) {

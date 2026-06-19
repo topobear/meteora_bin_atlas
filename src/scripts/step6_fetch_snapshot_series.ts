@@ -3,6 +3,7 @@ import path from "node:path";
 import { getDatasetId, logRpcSource, resolveRpcDataset } from "../datasets.js";
 import { formatTimestampForFilename } from "../meteora/discoverPools.js";
 import { fetchSnapshotSeries } from "../meteora/fetchSnapshotSeries.js";
+import { resolveSnapshotCacheConfig } from "../meteora/snapshotCache.js";
 import { writeJson } from "../io/writeJson.js";
 import { getConnection } from "../solana.js";
 
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
     projectRoot: process.cwd(),
     dataset,
     bounded,
+    cache: resolveSnapshotCacheConfig(),
   });
 
   await writeJson(rawPath, manifest);

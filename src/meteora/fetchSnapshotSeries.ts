@@ -12,6 +12,11 @@ import {
 } from "../rpcErrors.js";
 import { formatTimestampForFilename } from "./discoverPools.js";
 import { fetchBoundedBinsFromPool } from "./fetchBinArrays.js";
+import {
+  DEFAULT_SNAPSHOT_CACHE_TTL_SEC,
+  type SnapshotCacheConfig,
+  tryResolveSeriesFromCache,
+} from "./snapshotCache.js";
 import type { BinArraysFetchResult } from "./types.js";
 
 export type SnapshotSeriesEntry = {
@@ -49,6 +54,7 @@ export type FetchSnapshotSeriesOptions = {
     left: number;
     right: number;
   };
+  cache?: SnapshotCacheConfig;
 };
 
 /** Backoff when a snapshot RPC call fails (conservative, applied before retry). */
@@ -152,11 +158,40 @@ export async function fetchSnapshotSeries(
   poolAddress: string,
   options: FetchSnapshotSeriesOptions,
 ): Promise<SnapshotSeriesManifest> {
-  const seriesStartedAtUtc = new Date().toISOString();
-  const snapshots: SnapshotSeriesEntry[] = [];
   const rpcBackoffSec = options.rpcBackoffSec ?? 60;
   const dataset = options.dataset ?? "alchemy";
   const { left, right } = options.bounded;
+  const cacheConfig = options.cache ?? {
+    enabled: false,
+    ttlSec: DEFAULT_SNAPSHOT_CACHE_TTL_SEC,
+  };
+
+  const cachedSnapshots = await tryResolveSeriesFromCache(
+    options.projectRoot,
+    poolAddress,
+    options.count,
+    options.bounded,
+    cacheConfig,
+  );
+  if (cachedSnapshots) {
+    console.log(
+      `Snapshot cache: reusing ${cachedSnapshots.length} cached snapshots ` +
+        `(TTL ${cacheConfig.ttlSec}s, ${left}/${right} bins).`,
+    );
+    return {
+      pool_address: poolAddress,
+      series_started_at_utc: cachedSnapshots[0].fetched_at_utc,
+      series_completed_at_utc: cachedSnapshots[cachedSnapshots.length - 1].fetched_at_utc,
+      interval_sec: options.intervalSec,
+      rpc_backoff_sec: rpcBackoffSec,
+      snapshot_count: options.count,
+      bounded: options.bounded,
+      snapshots: cachedSnapshots,
+    };
+  }
+
+  const seriesStartedAtUtc = new Date().toISOString();
+  const snapshots: SnapshotSeriesEntry[] = [];
 
   let dlmmPool: Awaited<ReturnType<typeof DLMM.create>>;
   try {

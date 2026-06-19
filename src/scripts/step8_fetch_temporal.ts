@@ -12,6 +12,7 @@ import {
   fetchSnapshotSeries,
   RpcDatasetAbortError,
 } from "../meteora/fetchSnapshotSeries.js";
+import { resolveSnapshotCacheConfig } from "../meteora/snapshotCache.js";
 import {
   BIN_ATLAS_SERIES_CSV_HEADERS,
   normalizeSnapshotSeries,
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
       projectRoot,
       dataset,
       bounded: { left: binsLeft, right: binsRight },
+      cache: resolveSnapshotCacheConfig(),
     });
   } catch (error: unknown) {
     if (error instanceof RpcDatasetAbortError || isRpcDatasetError(error)) {

@@ -105,7 +105,7 @@ help:
 	@echo ""
 	@echo "Temporal knobs: DATASET, TEMPORAL_COUNT (240), TEMPORAL_POLL_HZ (1.5),"
 	@echo "  TEMPORAL_FPS (24), TEMPORAL_DURATION_SEC (10), TEMPORAL_OUTPUT (optional MP4 path),"
-	@echo "  SERIES_BINS_LEFT/RIGHT"
+	@echo "  SERIES_BINS_LEFT/RIGHT, SNAPSHOT_CACHE_TTL_SEC (3600)"
 	@echo "Timelapse knobs: TIMELAPSE_COUNT (2400), TIMELAPSE_SIM_COUNT (480),"
 	@echo "  TIMELAPSE_POLL_HZ (1.5), TIMELAPSE_FPS (24), TIMELAPSE_DURATION_SEC (10),"
 	@echo "  TIMELAPSE_OUTPUT (optional MP4 path)"
@@ -168,6 +168,10 @@ normalize-bins:
 atlas: discover fetch-pool fetch-bins normalize-bins
 
 # --- Temporal (make temporal) -----------------------------------------------
+
+# Reuse bounded raw snapshots in data/raw/ when younger than this TTL (seconds).
+SNAPSHOT_CACHE_TTL_SEC ?= 3600
+export SNAPSHOT_CACHE_TTL_SEC
 
 # Poll 240 snapshots @ 1.5 Hz (~3 min), render 1 snap = 1 frame → 10s MP4 at 24 fps.
 DATASET ?= alchemy

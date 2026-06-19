@@ -14,6 +14,11 @@ import { formatTimestampForFilename } from "./discoverPools.js";
 import { fetchBoundedBinsFromPool } from "./fetchBinArrays.js";
 import type { SnapshotSeriesEntry, SnapshotSeriesManifest } from "./fetchSnapshotSeries.js";
 import { RpcDatasetAbortError } from "./fetchSnapshotSeries.js";
+import {
+  DEFAULT_SNAPSHOT_CACHE_TTL_SEC,
+  type SnapshotCacheConfig,
+  tryResolveSeriesFromCache,
+} from "./snapshotCache.js";
 import type { BinArraysFetchResult } from "./types.js";
 
 export type TriangleLegInput = {
@@ -57,6 +62,7 @@ export type FetchTriangleSeriesOptions = {
     left: number;
     right: number;
   };
+  cache?: SnapshotCacheConfig;
 };
 
 const RETRY_BACKOFF_SEC = [15, 45, 90, 180];
@@ -147,12 +153,58 @@ export async function fetchTriangleSeries(
   connection: Connection,
   options: FetchTriangleSeriesOptions,
 ): Promise<TriangleSeriesManifest> {
-  const seriesStartedAtUtc = new Date().toISOString();
   const rpcBackoffSec = options.rpcBackoffSec ?? 60;
   const dataset = options.dataset ?? "alchemy";
   const { left, right } = options.bounded;
+  const cacheConfig = options.cache ?? {
+    enabled: false,
+    ttlSec: DEFAULT_SNAPSHOT_CACHE_TTL_SEC,
+  };
   const sortedLegs = [...options.legs].sort((a, b) => a.leg_index - b.leg_index);
   const totalFetches = options.countPerLeg * sortedLegs.length;
+
+  const cachedLegSnapshots = await Promise.all(
+    sortedLegs.map((leg) =>
+      tryResolveSeriesFromCache(
+        options.projectRoot,
+        leg.pool_address,
+        options.countPerLeg,
+        options.bounded,
+        cacheConfig,
+      ),
+    ),
+  );
+  if (cachedLegSnapshots.every((snapshots) => snapshots !== null)) {
+    console.log(
+      `Snapshot cache: reusing cached triangle legs ` +
+        `(${options.countPerLeg} snaps/leg, TTL ${cacheConfig.ttlSec}s, ${left}/${right} bins).`,
+    );
+    const legManifests: TriangleLegManifest[] = sortedLegs.map((leg, index) => ({
+      leg_index: leg.leg_index,
+      leg_key: leg.leg_key,
+      pool_address: leg.pool_address,
+      snapshots: cachedLegSnapshots[index] as SnapshotSeriesEntry[],
+    }));
+    const firstSnap = legManifests[0].snapshots[0]?.fetched_at_utc ?? new Date().toISOString();
+    const lastLeg = legManifests[legManifests.length - 1];
+    const lastSnap =
+      lastLeg.snapshots[lastLeg.snapshots.length - 1]?.fetched_at_utc ?? firstSnap;
+
+    return {
+      triangle_id: options.triangleId,
+      series_started_at_utc: firstSnap,
+      series_completed_at_utc: lastSnap,
+      interval_sec: options.intervalSec,
+      rpc_backoff_sec: rpcBackoffSec,
+      snapshot_count_per_leg: options.countPerLeg,
+      total_fetches: totalFetches,
+      interleaved: true,
+      bounded: options.bounded,
+      legs: legManifests,
+    };
+  }
+
+  const seriesStartedAtUtc = new Date().toISOString();
 
   const legSnapshots: TriangleLegManifest[] = sortedLegs.map((leg) => ({
     leg_index: leg.leg_index,
