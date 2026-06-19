@@ -1074,7 +1074,7 @@ def render_seismic_frame(
     return np.asarray(img.convert("RGB"))
 
 
-def encode_mp4(frames: list[np.ndarray], output_path: Path, *, fps: int) -> None:
+def encode_mp4(frames: list[np.ndarray], output_path: Path, *, fps: float) -> None:
     """Write RGB frame arrays to MP4 via ffmpeg rawvideo pipe."""
     if not frames:
         raise ValueError("No frames to encode")
@@ -1087,7 +1087,7 @@ def encode_mp4_stream(
     frames: Iterable[np.ndarray],
     output_path: Path,
     *,
-    fps: int,
+    fps: float,
     width: int,
     height: int,
 ) -> int:

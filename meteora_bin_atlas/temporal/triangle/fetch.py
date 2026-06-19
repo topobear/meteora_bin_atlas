@@ -79,6 +79,17 @@ def _latest_triangle_manifest(triangle_id: str, processed_dir: Path) -> Path:
     return matches[-1]
 
 
+def _latest_series_csv(pool_address: str, processed_dir: Path) -> Path:
+    matches = [
+        path
+        for path in processed_dir.glob(f"bin_atlas_series_{pool_address}_*.csv")
+        if not path.stem.endswith("_test")
+    ]
+    if not matches:
+        raise FileNotFoundError(f"No series CSV found for pool {pool_address}")
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
 def _csv_paths_from_manifest(manifest_path: Path, project_root: Path) -> tuple[Path, Path, Path]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     csv_paths: list[Path] = []
@@ -86,10 +97,7 @@ def _csv_paths_from_manifest(manifest_path: Path, project_root: Path) -> tuple[P
 
     for leg in manifest["legs"]:
         pool = leg["pool_address"]
-        matches = sorted(processed_dir.glob(f"bin_atlas_series_{pool}_*.csv"))
-        if not matches:
-            raise FileNotFoundError(f"No series CSV found for pool {pool}")
-        csv_paths.append(matches[-1])
+        csv_paths.append(_latest_series_csv(pool, processed_dir))
 
     if len(csv_paths) != 3:
         raise ValueError(f"Expected 3 leg CSVs, found {len(csv_paths)}")
@@ -97,8 +105,14 @@ def _csv_paths_from_manifest(manifest_path: Path, project_root: Path) -> tuple[P
 
 
 def _seed_csv_for_pool(pool_address: str, processed_dir: Path) -> Path | None:
-    matches = sorted(processed_dir.glob(f"bin_atlas_series_{pool_address}_*.csv"))
-    return matches[-1] if matches else None
+    matches = [
+        path
+        for path in processed_dir.glob(f"bin_atlas_series_{pool_address}_*.csv")
+        if not path.stem.endswith("_test")
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda path: path.stat().st_mtime)
 
 
 def fetch_triangle_data(
