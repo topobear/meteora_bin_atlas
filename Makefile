@@ -16,7 +16,7 @@
 # Bounded bins:   make fetch-bins BOUNDED=1 BINS_LEFT=30 BINS_RIGHT=30
 
 .PHONY: help install install-ts install-py smoke alchemy-dashboard clear-data clear-plots discover fetch-pool fetch-bins normalize-bins \
-	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated currency-triangle temporal temporal-simulated spatiotemporal spatiotemporal-simulated triangle-temporal triangle-temporal-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
+	fetch-ohlcv fetch-series normalize-series poll-snapshots fetch-data fetch-data-simulated currency-triangle temporal temporal-simulated spatiotemporal spatiotemporal-simulated triangle-temporal triangle-temporal-simulated triangle-timelapse triangle-timelapse-simulated timelapse timelapse-simulated simulate-series compare-simulation render-mp4 render-mp4-simulated render-mp4-demo atlas notebook
 
 # Alchemy API key setup: Apps → Solana Mainnet → API Key → paste into .env SOLANA_RPC_URL
 ALCHEMY_DASHBOARD_URL = https://dashboard.alchemy.com
@@ -92,6 +92,9 @@ help:
 	@echo "  make triangle-temporal  interleaved fetch of 3 legs + triangle MP4 (SOL/USDC/WETH, USDT fallback)"
 	@echo "                          TRIANGLE=sol_usdc_weth (default) · DATASET=simulated → no RPC"
 	@echo "  make triangle-temporal-simulated alias for triangle-temporal DATASET=simulated"
+	@echo "  make triangle-timelapse  2400 snaps/leg @ 1.5Hz → 10s triangle MP4 (subsampled)"
+	@echo "                          TRIANGLE=sol_usdc_weth (default) · DATASET=simulated → 480 snaps/leg"
+	@echo "  make triangle-timelapse-simulated alias for triangle-timelapse DATASET=simulated"
 	@echo "  make timelapse          2400 snaps @ 1.5Hz → 10s MP4 @ 24fps (subsampled timelapse)"
 	@echo "                          DATASET=simulated → no RPC, 480 snaps default (~1 min)"
 	@echo "  make timelapse-simulated  alias for timelapse DATASET=simulated"
@@ -237,6 +240,17 @@ TIMELAPSE_OUTPUT_ARGS = $(if $(TIMELAPSE_OUTPUT),--output $(TIMELAPSE_OUTPUT),)
 TIMELAPSE_ARGS = --pool $(POOL) --dataset $(DATASET) \
 	--duration-sec $(TIMELAPSE_DURATION_SEC) --fps $(TIMELAPSE_FPS) --count $(TIMELAPSE_COUNT) \
 	--poll-hz $(TIMELAPSE_POLL_HZ) $(TIMELAPSE_OUTPUT_ARGS)
+
+TRIANGLE_TIMELAPSE_ARGS = --triangle $(TRIANGLE) --dataset $(DATASET) \
+	--duration-sec $(TIMELAPSE_DURATION_SEC) --fps $(TIMELAPSE_FPS) --count $(TIMELAPSE_COUNT) \
+	--poll-hz $(TIMELAPSE_POLL_HZ) $(TIMELAPSE_OUTPUT_ARGS) \
+	--bins-left $(SERIES_BINS_LEFT) --bins-right $(SERIES_BINS_RIGHT)
+
+triangle-timelapse:
+	poetry run python -m meteora_bin_atlas.temporal.triangle.timelapse $(TRIANGLE_TIMELAPSE_ARGS)
+
+triangle-timelapse-simulated:
+	$(MAKE) triangle-timelapse DATASET=simulated
 
 timelapse:
 	poetry run python -m meteora_bin_atlas.temporal.timelapse $(TIMELAPSE_ARGS) \

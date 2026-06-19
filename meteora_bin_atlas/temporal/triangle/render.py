@@ -14,7 +14,7 @@ import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
 from meteora_bin_atlas.paths import DATA_PROCESSED, PLOTS_DIR
-from meteora_bin_atlas.temporal.render import resolve_token_labels
+from meteora_bin_atlas.temporal.render import resolve_token_labels, subsample_trace_indices
 from meteora_bin_atlas.temporal.reserve import build_price_map
 from meteora_bin_atlas.temporal.seismic import (
     DRIFT_STRIP_RIGHT,
@@ -1387,6 +1387,8 @@ def build_triangle_temporal_mp4(
     *,
     output_path: Path | None = None,
     fps: int = 24,
+    output_frames: int | None = None,
+    output_stem_prefix: str = "triangle_temporal",
     processed_dir: Path = DATA_PROCESSED,
     zoom_bins: int = 30,
     dpi: int = DEFAULT_LEG_DPI,
@@ -1400,12 +1402,17 @@ def build_triangle_temporal_mp4(
         for leg, csv_path in zip(spec.legs, leg_csv_paths, strict=True)
     ]
 
-    n_frames = min(len(ctx.traces) for ctx in leg_contexts)
-    if n_frames <= 0:
+    n_snapshots = min(len(ctx.traces) for ctx in leg_contexts)
+    if n_snapshots <= 0:
         raise ValueError("No snapshots available across triangle legs")
 
+    trace_indices = list(range(n_snapshots))
+    if output_frames is not None:
+        trace_indices = subsample_trace_indices(n_snapshots, output_frames)
+
+    n_frames = len(trace_indices)
     video_duration_sec = max(1e-6, n_frames / fps)
-    index_span = max(1, n_frames - 1)
+    index_span = max(1, trace_indices[-1] - trace_indices[0])
     snapshots_per_video_sec = index_span / video_duration_sec
     drift_window = max(2, int(round(DRIFT_WINDOW_SECONDS * snapshots_per_video_sec)))
 
@@ -1418,15 +1425,15 @@ def build_triangle_temporal_mp4(
         from datetime import UTC, datetime
 
         ts = datetime.now(UTC).isoformat().replace(":", "-").replace(".", "-")
-        output_path = PLOTS_DIR / f"triangle_temporal_{spec.triangle_id}_{ts}.mp4"
+        output_path = PLOTS_DIR / f"{output_stem_prefix}_{spec.triangle_id}_{ts}.mp4"
 
     output_path = output_path.resolve()
     def _frames() -> Iterable[np.ndarray]:
-        for frame_index in range(n_frames):
+        for snapshot_index in trace_indices:
             yield _draw_triangle_frame(
                 spec,
                 leg_contexts,
-                frame_index=frame_index,
+                frame_index=snapshot_index,
                 display_frames=display_frames,
                 prior_indices=prior_indices,
                 radar_history=radar_history,
@@ -1442,5 +1449,11 @@ def build_triangle_temporal_mp4(
         height=TRIANGLE_HEIGHT,
     )
     print(f"Triangle MP4: {output_path}")
-    print(f"  streamed {frame_count} frames @ {fps} fps")
+    if output_frames is not None and n_snapshots > output_frames:
+        print(
+            f"  streamed {frame_count} frames @ {fps} fps "
+            f"(subsampled {n_snapshots} snapshots → {output_frames})"
+        )
+    else:
+        print(f"  streamed {frame_count} frames @ {fps} fps")
     return output_path
